@@ -2,24 +2,30 @@
  * 应用入口。
  * Application entry point.
  *
- * M0：仅装载配置并打印启动信息，验证脚手架可运行。
- * 事件循环（飞书长连接）将在 M1 接入，见 docs/development-plan.md。
+ * M1：启动飞书长连接，收 im.message.receive_v1 并原样回声。
+ * 事件路由（意图识别）将在 M3 接入，见 docs/development-plan.md。
  */
 
 import { config } from './config';
 import { listProjectAliases } from './config/projects';
 import { logger } from './util/logger';
+import { larkWsClient } from './feishu/client';
+import { buildDispatcher } from './feishu/dispatcher';
+import { MessageController } from './controller/message-controller';
 
 function main(): void {
-  logger.info('FeiShuBot starting (M0 skeleton)');
-  logger.info(`Feishu domain   : ${config.feishu.domain}`);
-  logger.info(`LLM provider    : ${config.llm.provider} (model: ${config.llm.model || 'unset'})`);
-  logger.info(`Intent model    : ${config.llm.intentModel || 'unset'}`);
-  logger.info(`CLI provider    : ${config.cli.provider}`);
-  logger.info(`GitLab base url : ${config.gitlab.baseUrl || 'unset'}`);
+  logger.info('FeiShuBot starting (M1 echo)');
+  logger.info(`Feishu domain : ${config.feishu.domain}`);
+  logger.info(`LLM provider  : ${config.llm.provider} (model: ${config.llm.model || 'unset'})`);
+  logger.info(`CLI provider  : ${config.cli.provider}`);
   const aliases = listProjectAliases();
-  logger.info(`Projects        : ${aliases.length ? aliases.join(', ') : '(none registered)'}`);
-  logger.info('尚未接入事件循环 — 见 docs/development-plan.md (M1 飞书长连接回声)。');
+  logger.info(`Projects      : ${aliases.length ? aliases.join(', ') : '(none registered)'}`);
+
+  const controller = new MessageController();
+  const dispatcher = buildDispatcher((msg) => controller.handle(msg));
+
+  larkWsClient.start({ eventDispatcher: dispatcher });
+  logger.info('已启动飞书长连接，等待消息…（Ctrl+C 退出）');
 }
 
 main();

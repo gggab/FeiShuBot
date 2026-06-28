@@ -10,7 +10,10 @@
 
 import dotenv from 'dotenv';
 
+// 先加载 .env，再用 .env.local 覆盖（本地私密配置，已被 .gitignore 忽略）。
+// Load .env first, then override with .env.local (git-ignored local secrets).
 dotenv.config();
+dotenv.config({ path: '.env.local', override: true });
 
 function str(key: string, fallback = ''): string {
   return process.env[key] ?? fallback;

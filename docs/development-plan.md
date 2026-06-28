@@ -10,9 +10,13 @@
 - 设计契约已落代码：`config/`、`intent/types`、`handlers/types`、`cli/runner`、`session/context`、`util/{logger,throttle}`；其余模块为带里程碑标注的占位。
 - 验收已通过：`yarn install`、`yarn type-check`、`yarn build` 均 0 报错；`yarn dev` 可启动并打印配置摘要。
 
-### M1 — 飞书最小回声
-- `feishu/`：WSClient + dispatcher，收 `im.message.receive_v1`，原样回声。
-- 验收：单聊发文本，机器人回复（验证应用配置、长连接打通）。
+### M1 — 飞书最小回声 ✅（2026-06-28 完成）
+- `feishu/`：`client`（Client/WSClient 单例，缺凭据显式抛错）、`message`（事件归一化纯函数）、`dispatcher`（注册 `im.message.receive_v1`，单条失败不中断监听）、`reply.sendText`。
+- `controller/message-controller`：M1 原样回声（M3 替换为意图路由）。
+- `config` 增加加载 `.env.local`（覆盖 `.env`）。
+- 测试：`tests/feishu/message.test.ts`（vitest）覆盖文本/非文本/非法 JSON/缺字段，4 项通过。
+- 验收已通过：`yarn type-check`、`yarn test` 0 报错；`yarn dev` 用真实凭据成功建立长连接（`ws client ready`）。
+- 待人工冒烟：在飞书单聊向机器人发文本，确认收到 `收到：<原文>` 回声（需真实账号操作）。
 
 ### M2 — 大模型客户端 + 普通聊天
 - `llm/provider.ts` + `client.ts`（OpenAI 兼容，DeepSeek/Qwen/GLM 可切）。
