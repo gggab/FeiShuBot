@@ -41,6 +41,7 @@
 - `cli/process.ts`（spawn + 流式 stdout + 超时 + 取消）、`cli/claude.ts`（`buildClaudeArgs`：只读用 `--allowedTools Read Grep Glob`，写用 `--permission-mode acceptEdits`）、`cli/factory.ts`（按 `CLI_PROVIDER` 取 runner，默认 claude）。
 - `handlers/resolve-project.ts`（纯函数：默认/唯一/追问/未知拒绝/目录不存在校验，安全边界）。
 - `CodeUnderstandingHandler`：解析项目 → 在 `cwd` 内 `claude -p` 只读阅读 → 流式回卡片。
+- CLI 用 `--output-format stream-json --verbose`：控制台打印**后端对 Claude 的调用命令**与 **Claude 的处理过程**（初始化/思考/工具调用/工具结果/完成统计），卡片仅收干净文本（`parseClaudeStream`）。
 - 测试：`resolve-project`(7) + `cli/claude-args`(3) = 10 新增，合计 **39 项全通过**。
 - 验收已通过：`yarn type-check`/`yarn test` 0 报错；live 跑通——在 portal 仓库只读提问，claude 读 `package.json` 正确答出「Vue 3 + Vite 5」；spawn/stream/exit 正常。
 - 注意：Windows 下 `CLI_BIN` 需填 `claude.exe` 绝对路径（spawn 不走 PATHEXT）。
