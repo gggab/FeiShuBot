@@ -13,6 +13,7 @@ import { larkWsClient } from './feishu/client';
 import { buildDispatcher } from './feishu/dispatcher';
 import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
+import { getCliRunner } from './cli/factory';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -29,13 +30,15 @@ function main(): void {
   logger.info(`Projects      : ${aliases.length ? aliases.join(', ') : '(none registered)'}`);
 
   const llm = createLlmClient();
+  const cliRunner = getCliRunner();
+  logger.info(`CLI runner    : ${cliRunner.name} (bin: ${config.cli.bin || cliRunner.name})`);
   const recognizer = new IntentRecognizer(llm, {
     model: config.llm.intentModel,
     minConfidence: config.llm.intentMinConfidence,
   });
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
-    new CodeUnderstandingHandler(),
+    new CodeUnderstandingHandler(cliRunner),
     new BugFixHandler(),
     new KnowledgeQaHandler(),
   ]);

@@ -35,14 +35,22 @@
 - 验收已通过：`yarn type-check`、`yarn test` 0 报错；live 调用 `deepseek-v4-flash` 对 5 条标注样本**全部分类正确**（chat/code/bug/knowledge）且 JSON 可解析；`yarn dev` 启动正常。
 - 待人工冒烟：飞书内分别发四类问题，观察分类与占位/聊天回复；构造模糊问题验证低置信度降级提示。
 
-### M4 — CLI 集成（代码理解 + Bug 修复 MR 流程）
-- `cli/`：`CliRunner` + `claude`(默认)/`codex` 适配 + spawn/stream/timeout/cancel。
-- `config/projects.ts` 项目注册表（含 `gitlabProjectId`/`baseBranch`）+ 目录白名单 + 用户映射。
-- `CodeUnderstandingHandler`（只读）。
+### M4 — CLI 集成
+
+#### M4a — 代码理解（只读）✅（2026-06-28 完成）
+- `cli/process.ts`（spawn + 流式 stdout + 超时 + 取消）、`cli/claude.ts`（`buildClaudeArgs`：只读用 `--allowedTools Read Grep Glob`，写用 `--permission-mode acceptEdits`）、`cli/factory.ts`（按 `CLI_PROVIDER` 取 runner，默认 claude）。
+- `handlers/resolve-project.ts`（纯函数：默认/唯一/追问/未知拒绝/目录不存在校验，安全边界）。
+- `CodeUnderstandingHandler`：解析项目 → 在 `cwd` 内 `claude -p` 只读阅读 → 流式回卡片。
+- 测试：`resolve-project`(7) + `cli/claude-args`(3) = 10 新增，合计 **39 项全通过**。
+- 验收已通过：`yarn type-check`/`yarn test` 0 报错；live 跑通——在 portal 仓库只读提问，claude 读 `package.json` 正确答出「Vue 3 + Vite 5」；spawn/stream/exit 正常。
+- 注意：Windows 下 `CLI_BIN` 需填 `claude.exe` 绝对路径（spawn 不走 PATHEXT）。
+- 待人工冒烟：飞书内问「portal 的登录怎么实现」，观察卡片流式给出解释。
+
+#### M4b — Bug 修复（GitLab MR 流程）⏳ 待做
 - `BugFixHandler` + `git/`（工作区准备、切分支、提交、推送）+ `gitlab/`（创建 MR）：
   从测试分支切 `fix/*` → CLI 修复 → commit → push → 建 MR → 指派发起人。
+- 需先备齐：`GITLAB_BASE_URL` / `GITLAB_TOKEN` / `USER_MAP_JSON`。
 - 验收：
-  - 注册项目内只读解释代码可用；越权路径被拒；超时可终止。
   - Bug 修复能从 baseBranch 切分支、提交、推送、建出 MR，target=baseBranch，回卡片给 MR 链接。
   - 无改动时不建空 MR 并清理分支；失败时回滚工作区、不留脏分支。
   - 用户映射命中→指派 reviewer；未命中→MR 照建并显式提示。
