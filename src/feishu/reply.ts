@@ -29,6 +29,7 @@ export async function sendText(chatId: string, text: string): Promise<{ messageI
   if (res.code !== 0) {
     throw new Error(`发送消息失败: code=${res.code} msg=${res.msg}`);
   }
+  logger.debug(`[飞书] sendText chat=${chatId} chars=${text.length} message_id=${res.data?.message_id ?? ''}`);
   return { messageId: res.data?.message_id ?? '' };
 }
 
@@ -44,6 +45,7 @@ export async function sendCard(chatId: string, card: object): Promise<{ messageI
   if (res.code !== 0) {
     throw new Error(`发送卡片失败: code=${res.code} msg=${res.msg}`);
   }
+  logger.debug(`[飞书] sendCard chat=${chatId} message_id=${res.data?.message_id ?? ''}`);
   return { messageId: res.data?.message_id ?? '' };
 }
 
@@ -55,6 +57,7 @@ export async function updateCard(messageId: string, card: object): Promise<void>
   if (res.code !== 0) {
     throw new Error(`更新卡片失败: code=${res.code} msg=${res.msg}`);
   }
+  logger.debug(`[飞书] updateCard message_id=${messageId}`);
 }
 
 /**

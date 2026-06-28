@@ -22,9 +22,14 @@ export function buildDispatcher(onMessage: OnMessage): Lark.EventDispatcher {
     'im.message.receive_v1': (data) => {
       const msg = parseIncoming(data);
 
+      logger.info(
+        `[事件] im.message.receive_v1 message_id=${msg.messageId} type=${msg.messageType} ` +
+          `chat_type=${msg.chatType} from=${msg.userId}`
+      );
+
       // 去重：同一 message_id 的重复推送直接忽略。
       if (dedup.isDuplicate(msg.messageId)) {
-        logger.debug(`忽略重复事件 message_id=${msg.messageId}`);
+        logger.info(`[事件] 忽略重复推送 message_id=${msg.messageId}`);
         return;
       }
 

@@ -7,6 +7,7 @@
  */
 
 import type OpenAI from 'openai';
+import { logger } from '../util/logger';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -33,25 +34,36 @@ export class OpenAiClient implements LlmClient {
   ) {}
 
   async chat(messages: ChatMessage[], opts?: ChatOptions): Promise<string> {
+    const model = opts?.model ?? this.defaultModel;
+    logger.debug(`[llm] chat model=${model} messages=${messages.length} temp=${opts?.temperature ?? 'default'}`);
     const res = await this.client.chat.completions.create({
-      model: opts?.model ?? this.defaultModel,
+      model,
       messages,
       temperature: opts?.temperature,
       stream: false,
     });
-    return res.choices[0]?.message?.content ?? '';
+    const content = res.choices[0]?.message?.content ?? '';
+    logger.debug(`[llm] chat 完成 chars=${content.length}`);
+    return content;
   }
 
   async *chatStream(messages: ChatMessage[], opts?: ChatOptions): AsyncIterable<string> {
+    const model = opts?.model ?? this.defaultModel;
+    logger.debug(`[llm] chatStream model=${model} messages=${messages.length} temp=${opts?.temperature ?? 'default'}`);
     const stream = await this.client.chat.completions.create({
-      model: opts?.model ?? this.defaultModel,
+      model,
       messages,
       temperature: opts?.temperature,
       stream: true,
     });
+    let chunks = 0;
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content;
-      if (delta) yield delta;
+      if (delta) {
+        chunks++;
+        yield delta;
+      }
     }
+    logger.debug(`[llm] chatStream 完成 chunks=${chunks}`);
   }
 }
