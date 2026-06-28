@@ -1,0 +1,84 @@
+/**
+ * 应用配置装载。
+ * Loads configuration from environment variables (.env).
+ *
+ * 设计对齐 docs/configuration.md。
+ * - 数值类环境变量非法时**显式抛错**（No hidden errors）。
+ * - 必填项缺失的校验在各功能真正启用时进行（见 assertRequired），
+ *   以保证 M0 空骨架在没有 .env 的情况下也能启动。
+ */
+
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+function str(key: string, fallback = ''): string {
+  return process.env[key] ?? fallback;
+}
+
+function int(key: string, fallback: number): number {
+  const v = process.env[key];
+  if (v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (!Number.isInteger(n)) throw new Error(`环境变量 ${key} 必须是整数，实际为: ${v}`);
+  return n;
+}
+
+function float(key: string, fallback: number): number {
+  const v = process.env[key];
+  if (v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (Number.isNaN(n)) throw new Error(`环境变量 ${key} 必须是数字，实际为: ${v}`);
+  return n;
+}
+
+const llmModel = str('LLM_MODEL');
+
+export const config = {
+  feishu: {
+    appId: str('APP_ID'),
+    appSecret: str('APP_SECRET'),
+    domain: str('LARK_DOMAIN', 'https://open.feishu.cn'),
+  },
+  llm: {
+    provider: str('LLM_PROVIDER', 'deepseek'),
+    baseUrl: str('LLM_BASE_URL'),
+    apiKey: str('LLM_API_KEY'),
+    model: llmModel,
+    intentModel: str('INTENT_MODEL') || llmModel,
+    intentMinConfidence: float('INTENT_MIN_CONFIDENCE', 0.5),
+  },
+  cli: {
+    provider: str('CLI_PROVIDER', 'claude'),
+    bin: str('CLI_BIN'),
+    timeoutMs: int('CLI_TIMEOUT_MS', 300000),
+  },
+  gitlab: {
+    baseUrl: str('GITLAB_BASE_URL'),
+    token: str('GITLAB_TOKEN'),
+    defaultBaseBranch: str('GIT_DEFAULT_BASE_BRANCH', 'test'),
+    fixBranchPrefix: str('FIX_BRANCH_PREFIX', 'fix/'),
+  },
+  dify: {
+    baseUrl: str('DIFY_BASE_URL'),
+    apiKey: str('DIFY_API_KEY'),
+  },
+  service: {
+    port: int('PORT', 3000),
+    sessionMaxTurns: int('SESSION_MAX_TURNS', 10),
+    logLevel: str('LOG_LEVEL', 'info'),
+  },
+} as const;
+
+export type AppConfig = typeof config;
+
+/**
+ * 在功能启用前校验必填项；缺失即显式抛错（不静默兜底）。
+ * Assert required env keys are present before a feature starts.
+ */
+export function assertRequired(entries: Array<[name: string, value: string]>): void {
+  const missing = entries.filter(([, value]) => value.trim() === '').map(([name]) => name);
+  if (missing.length > 0) {
+    throw new Error(`缺少必填配置: ${missing.join(', ')}（见 docs/configuration.md）`);
+  }
+}
