@@ -27,10 +27,13 @@
 - 验收已通过：`yarn type-check`、`yarn test` 0 报错；一次性 live 调用确认 `deepseek-v4-flash` 可用；`yarn dev` 启动后长连接 + LLM 客户端就绪。
 - 待人工冒烟：飞书内多轮闲聊看流式显示；`/clear` 后上下文被清空。
 
-### M3 — 意图识别 + 路由
-- `intent/recognizer.ts` + `prompt.ts`；`HandlerRegistry`。
-- 暂时四类都先接到「占位/或 chat」，重点验证分类与路由、置信度降级。
-- 验收：标注样本分类命中达标；低置信度显式降级。
+### M3 — 意图识别 + 路由 ✅（2026-06-28 完成）
+- `intent/prompt.ts`（分类系统/用户提示词，含项目别名与指代上下文）+ `intent/recognizer.ts`（`parseIntentResult` 纯函数 + `IntentRecognizer`：阈值降级、解析失败重试 1 次后降级、LLM 异常抛 `IntentServiceError`）。
+- `handlers/registry.ts`；`code-understanding`/`bug-fix`/`knowledge-qa` 改为可观测占位 Handler（M4/M5 替换）。
+- `MessageController` 改为：`/clear` → 单任务守卫 → 意图识别 →（降级则显式提示）→ 路由到 Handler。
+- 测试：`intent/parse`(7) + `intent/recognizer`(5) + `handlers/registry`(2) = 14 新增，合计 **29 项全通过**。
+- 验收已通过：`yarn type-check`、`yarn test` 0 报错；live 调用 `deepseek-v4-flash` 对 5 条标注样本**全部分类正确**（chat/code/bug/knowledge）且 JSON 可解析；`yarn dev` 启动正常。
+- 待人工冒烟：飞书内分别发四类问题，观察分类与占位/聊天回复；构造模糊问题验证低置信度降级提示。
 
 ### M4 — CLI 集成（代码理解 + Bug 修复 MR 流程）
 - `cli/`：`CliRunner` + `claude`(默认)/`codex` 适配 + spawn/stream/timeout/cancel。
