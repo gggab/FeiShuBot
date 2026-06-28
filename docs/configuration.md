@@ -1,0 +1,150 @@
+# 配置说明
+
+所有配置通过环境变量（`.env`）装载，集中在 `src/config/index.ts`。`.env` 不入库；提供 `.env.example` 模板。
+
+## 1. 环境变量
+
+### 飞书
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `APP_ID` | ✅ | — | 飞书应用 App ID |
+| `APP_SECRET` | ✅ | — | 飞书应用 App Secret |
+| `LARK_DOMAIN` | | `https://open.feishu.cn` | 国内版；Lark 国际版改 `https://open.larksuite.com` |
+
+### 大模型（意图识别 + 聊天，OpenAI 兼容）
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `LLM_PROVIDER` | | `deepseek` | `deepseek` / `qwen` / `glm` |
+| `LLM_BASE_URL` | ✅ | — | OpenAI 兼容 endpoint |
+| `LLM_API_KEY` | ✅ | — | API Key |
+| `LLM_MODEL` | ✅ | — | 聊天用模型名 |
+| `INTENT_MODEL` | | 同 `LLM_MODEL` | 意图识别用模型（可选更快更小） |
+| `INTENT_MIN_CONFIDENCE` | | `0.5` | 低于此值降级为 chat（见 intent-recognition.md） |
+
+常用 Provider 参考（endpoint/模型名以官方为准，实现期回写确认）：
+- DeepSeek：`https://api.deepseek.com`，如 `deepseek-chat`。
+- 通义千问（DashScope 兼容）：`https://dashscope.aliyuncs.com/compatible-mode/v1`，如 `qwen-plus`。
+- 智谱 GLM：`https://open.bigmodel.cn/api/paas/v4`，如 `glm-4`。
+
+### 本地 CLI
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `CLI_PROVIDER` | | `claude` | `claude`（Claude Code，默认）/ `codex`（ChatGPT CLI） |
+| `CLI_BIN` | | 同 provider 名 | 可执行文件路径（不在 PATH 时指定绝对路径） |
+| `CLI_TIMEOUT_MS` | | `300000` | 单次 CLI 任务超时（5 分钟） |
+
+### Bug 修复 / GitLab（MR 工作流）
+BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发起人（见 handlers.md §3）。
+
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `GITLAB_BASE_URL` | ✅(用到时) | — | GitLab 实例地址，如 `https://gitlab.company.com` |
+| `GITLAB_TOKEN` | ✅(用到时) | — | 建 MR 用的 access token（需 `api` 权限） |
+| `GIT_DEFAULT_BASE_BRANCH` | | `test` | 项目未单独配置时的默认测试分支 |
+| `FIX_BRANCH_PREFIX` | | `fix/` | 修复分支前缀 |
+
+### 知识库（本期占位）
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `DIFY_BASE_URL` | | — | 本期未接入，留空即可 |
+| `DIFY_API_KEY` | | — | 同上 |
+
+### 服务
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `PORT` | | `3000` | 仅 Webhook / 卡片回调 / 健康检查需要；纯长连接可不监听 |
+| `SESSION_MAX_TURNS` | | `10` | 会话上下文保留轮数 |
+| `LOG_LEVEL` | | `info` | 日志级别 |
+
+## 2. 项目注册表（Project Registry）
+
+`src/config/projects.ts` 维护**别名 → 本地绝对路径**映射，是 CLI 执行的**安全边界**：CLI 只能在注册过的目录内运行。
+
+形态（二选一，实现期定）：
+- 代码内常量；或
+- 环境变量 `PROJECTS_JSON`，例：
+
+```json
+{
+  "feishubot": {
+    "path": "C:/Users/.../FeiShuBot",
+    "default": true,
+    "gitlabProjectId": "group/feishubot",
+    "baseBranch": "test"
+  },
+  "order": {
+    "path": "C:/work/order-service",
+    "gitlabProjectId": "backend/order-service",
+    "baseBranch": "develop"
+  }
+}
+```
+
+字段：
+- `path`：本地仓库绝对路径（CLI 执行的安全边界）。
+- `default`：未指定项目时使用。
+- `gitlabProjectId`：GitLab 项目路径或数字 ID，建 MR 用；不配则该项目不支持 Bug 修复 MR 流程（Handler 显式提示）。
+- `baseBranch`：测试分支，BugFix 从此切出并以此为 MR target；缺省取 `GIT_DEFAULT_BASE_BRANCH`。
+
+规则：
+- 意图识别给出的 `project` 别名必须命中此表，否则视为未指定。
+- 未指定且存在 `default` → 用默认项目；多项目且无默认 → Handler 追问。
+- 任何不在表中的路径一律拒绝。
+
+## 2.1 飞书用户 → GitLab 用户映射
+
+BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书 open_id → GitLab 用户」映射。环境变量 `USER_MAP_JSON`：
+
+```json
+{
+  "ou_xxxxxxxxopenid1": { "gitlabUserId": 12, "gitlabUsername": "zhangsan" },
+  "ou_xxxxxxxxopenid2": { "gitlabUserId": 34, "gitlabUsername": "lisi" }
+}
+```
+
+- 命中 → MR 的 `assignee_id`/`reviewer_ids` 用对应 GitLab 用户。
+- 未命中 → MR 照建，assignee 留空，卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。
+
+## 3. `.env.example`（实现期产出）
+
+```dotenv
+# Feishu
+APP_ID=
+APP_SECRET=
+LARK_DOMAIN=https://open.feishu.cn
+
+# LLM (OpenAI-compatible)
+LLM_PROVIDER=deepseek
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=
+LLM_MODEL=deepseek-chat
+INTENT_MODEL=
+INTENT_MIN_CONFIDENCE=0.5
+
+# Local CLI
+CLI_PROVIDER=claude
+CLI_BIN=
+CLI_TIMEOUT_MS=300000
+
+# Bug fix / GitLab MR workflow
+GITLAB_BASE_URL=
+GITLAB_TOKEN=
+GIT_DEFAULT_BASE_BRANCH=test
+FIX_BRANCH_PREFIX=fix/
+
+# Dify (not wired yet)
+DIFY_BASE_URL=
+DIFY_API_KEY=
+
+# Service
+PORT=3000
+SESSION_MAX_TURNS=10
+LOG_LEVEL=info
+
+# Projects (alias -> { path, default, gitlabProjectId, baseBranch })
+PROJECTS_JSON={}
+# Feishu open_id -> GitLab user
+USER_MAP_JSON={}
+```
+
+> 启动时校验必填项缺失即**显式报错退出**（No hidden errors），不使用静默默认值兜过去。
