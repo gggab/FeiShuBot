@@ -8,6 +8,10 @@ dist/
 .env
 .env.local
 
+# local registry / mapping (machine-specific paths, ignored)
+projects.json
+usermap.json
+
 # logs
 *.log
 

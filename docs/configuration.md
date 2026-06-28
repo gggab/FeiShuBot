@@ -60,31 +60,33 @@ BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发
 
 `src/config/projects.ts` 维护**别名 → 本地绝对路径**映射，是 CLI 执行的**安全边界**：CLI 只能在注册过的目录内运行。
 
-形态（二选一，实现期定）：
-- 代码内常量；或
-- 环境变量 `PROJECTS_JSON`，例：
+**加载优先级**（`loadJsonConfig`，缺/坏即显式抛错）：
+1. **文件**：`PROJECTS_FILE`（默认 `projects.json`，git 忽略），存在即用——**推荐**，多仓库时可读性好；
+2. 否则内联环境变量 `PROJECTS_JSON`（小型场景）；
+3. 都没有则为空注册表。
+
+`projects.json` 示例（见 `projects.example.json`）：
 
 ```json
 {
-  "feishubot": {
-    "path": "C:/Users/.../FeiShuBot",
+  "portal": {
+    "path": "C:/Users/you/work/std-smart-office-portal",
     "default": true,
-    "gitlabProjectId": "group/feishubot",
-    "baseBranch": "test"
-  },
-  "order": {
-    "path": "C:/work/order-service",
-    "gitlabProjectId": "backend/order-service",
+    "gitlabProjectId": "ksa/standard-smart-office/frontend/std-smart-office-portal",
     "baseBranch": "develop"
+  },
+  "data": {
+    "path": "C:/Users/you/work/std-smart-office-data",
+    "gitlabProjectId": "ksa/standard-smart-office/std-smart-office-data"
   }
 }
 ```
 
 字段：
-- `path`：本地仓库绝对路径（CLI 执行的安全边界）。
+- `path`：本地仓库绝对路径（CLI 执行的安全边界）。**Windows 用正斜杠 `/`**。
 - `default`：未指定项目时使用。
-- `gitlabProjectId`：GitLab 项目路径或数字 ID，建 MR 用；不配则该项目不支持 Bug 修复 MR 流程（Handler 显式提示）。
-- `baseBranch`：测试分支，BugFix 从此切出并以此为 MR target；缺省取 `GIT_DEFAULT_BASE_BRANCH`。
+- `gitlabProjectId`：GitLab 项目路径或数字 ID，建 MR 用；不配则该项目不支持 Bug 修复 MR 流程（Handler 显式提示，仍可只读代码理解）。**跨 GitLab 实例的仓库无法用同一 `GITLAB_BASE_URL` 建 MR**，可只配 `path` 走只读。
+- `baseBranch`：测试/集成分支，BugFix 从此切出并以此为 MR target；缺省取 `GIT_DEFAULT_BASE_BRANCH`。仅 Bug 修复用；只读代码理解可不填。
 
 规则：
 - 意图识别给出的 `project` 别名必须命中此表，否则视为未指定。
@@ -93,7 +95,7 @@ BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发
 
 ## 2.1 飞书用户 → GitLab 用户映射
 
-BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书 open_id → GitLab 用户」映射。环境变量 `USER_MAP_JSON`：
+BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书 open_id → GitLab 用户」映射。与项目注册表同样的加载优先级：文件 `USER_MAP_FILE`（默认 `usermap.json`，git 忽略）> 环境变量 `USER_MAP_JSON`：
 
 ```json
 {

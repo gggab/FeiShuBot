@@ -1,0 +1,14 @@
+{
+  "_comment": "复制为 projects.json（已被 git 忽略）后按实际填写。别名(键)是飞书里引用项目的名字，也是意图识别填入 project 字段的值。路径用正斜杠 / 。gitlabProjectId/baseBranch 仅 Bug 修复建 MR 时需要；只读代码理解只需 path。",
+  "myproject": {
+    "path": "C:/Users/you/work/my-project",
+    "default": true,
+    "gitlabProjectId": "group/sub/my-project",
+    "baseBranch": "develop"
+  },
+  "another": {
+    "path": "C:/Users/you/work/another-repo",
+    "gitlabProjectId": "group/sub/another-repo",
+    "baseBranch": "main"
+  }
+}
