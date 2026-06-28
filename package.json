@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.50.1",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "openai": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

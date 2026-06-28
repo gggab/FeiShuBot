@@ -1,9 +1,10 @@
 /**
- * 用户会话上下文。完整实现见 M2（docs/development-plan.md）。
- * Per-user conversation context. Full implementation in M2.
- *
- * 本文件在 M0 仅锁定对外类型，便于 handlers 等模块按契约编译。
+ * 用户会话上下文：维护近 maxTurns 轮对话（user+assistant 为一轮）。
+ * Per-user conversation context, bounded to the most recent maxTurns turns.
+ * 设计对齐 docs/architecture.md (session/)。
  */
+
+import { config } from '../config';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -11,7 +12,47 @@ export interface ChatTurn {
 }
 
 export class SessionContext {
-  constructor(public readonly userId: string) {}
+  private messages: ChatTurn[] = [];
 
-  // TODO(M2): 维护近 SESSION_MAX_TURNS 轮对话历史；提供 addTurn / getHistory / clear。
+  constructor(
+    public readonly userId: string,
+    private readonly maxTurns: number = config.service.sessionMaxTurns
+  ) {}
+
+  addUser(content: string): void {
+    this.append({ role: 'user', content });
+  }
+
+  addAssistant(content: string): void {
+    this.append({ role: 'assistant', content });
+  }
+
+  private append(turn: ChatTurn): void {
+    this.messages.push(turn);
+    const maxMessages = this.maxTurns * 2;
+    if (this.messages.length > maxMessages) {
+      this.messages = this.messages.slice(this.messages.length - maxMessages);
+    }
+  }
+
+  /** 返回历史副本（不可被外部修改） / Copy of history. */
+  getHistory(): ChatTurn[] {
+    return [...this.messages];
+  }
+
+  clear(): void {
+    this.messages = [];
+  }
+}
+
+const sessions = new Map<string, SessionContext>();
+
+/** 取（或创建）某用户的会话上下文（单例） / Get-or-create a user's session. */
+export function getSession(userId: string): SessionContext {
+  let session = sessions.get(userId);
+  if (!session) {
+    session = new SessionContext(userId);
+    sessions.set(userId, session);
+  }
+  return session;
 }

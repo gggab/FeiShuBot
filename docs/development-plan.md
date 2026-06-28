@@ -18,10 +18,14 @@
 - 验收已通过：`yarn type-check`、`yarn test` 0 报错；`yarn dev` 用真实凭据成功建立长连接（`ws client ready`）。
 - 待人工冒烟：在飞书单聊向机器人发文本，确认收到 `收到：<原文>` 回声（需真实账号操作）。
 
-### M2 — 大模型客户端 + 普通聊天
-- `llm/provider.ts` + `client.ts`（OpenAI 兼容，DeepSeek/Qwen/GLM 可切）。
-- `ChatHandler` + 流式卡片回复 + `SessionContext`。
-- 验收：闲聊能多轮、流式显示；`/clear` 清空上下文。
+### M2 — 大模型客户端 + 普通聊天 ✅（2026-06-28 完成）
+- `llm/client.ts`（`LlmClient` 接口 + `OpenAiClient`，可注入 mock）+ `llm/provider.ts`（工厂，缺配置显式抛错）。
+- `feishu/card.ts`（流式 markdown 卡片）+ `feishu/reply.ts` 增 `sendCard`/`updateCard`/`CardReplyStream`（节流更新 + closed 守卫）。
+- `session/context.ts`（按用户单例、近 maxTurns 轮、`getHistory` 返回副本）。
+- `handlers/chat.ts`（流式聊天 + 写回会话 + 失败 `reply.fail`）；`MessageController` 改为：`/clear` → 每用户单任务守卫 → 流式聊天。
+- 测试：`session`(3) + `card`(2) + `chat`(2) + 既有 `message`(4) = 11 项全通过。
+- 验收已通过：`yarn type-check`、`yarn test` 0 报错；一次性 live 调用确认 `deepseek-v4-flash` 可用；`yarn dev` 启动后长连接 + LLM 客户端就绪。
+- 待人工冒烟：飞书内多轮闲聊看流式显示；`/clear` 后上下文被清空。
 
 ### M3 — 意图识别 + 路由
 - `intent/recognizer.ts` + `prompt.ts`；`HandlerRegistry`。
