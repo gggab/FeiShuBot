@@ -31,7 +31,8 @@
 |------|------|------|------|
 | `CLI_PROVIDER` | | `claude` | `claude`（Claude Code，默认）/ `codex`（ChatGPT CLI） |
 | `CLI_BIN` | | 同 provider 名 | 可执行文件路径（不在 PATH 时指定绝对路径） |
-| `CLI_TIMEOUT_MS` | | `300000` | 单次 CLI 任务超时（5 分钟） |
+| `CLI_TIMEOUT_MS` | | `300000` | 只读代码理解超时（5 分钟） |
+| `BUGFIX_TIMEOUT_MS` | | `1200000` | Bug 修复（写）超时（20 分钟；定位+修改更耗时） |
 
 ### Bug 修复 / GitLab（MR 工作流）
 BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发起人（见 handlers.md §3）。
@@ -106,6 +107,22 @@ BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书
 
 - 命中 → MR 的 `assignee_id`/`reviewer_ids` 用对应 GitLab 用户。
 - 未命中 → MR 照建，assignee 留空，卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。
+
+## 2.2 代码修改授权白名单（强制校验）
+
+「修改代码 / Bug 修复」是写操作（会 push 分支、建 MR），**只有白名单内的飞书用户(open_id)可触发**；只读的代码理解不受限。在 `BugFixHandler` 入口强制校验（`src/auth/authorization.ts` 的 `canModifyCode`）。
+
+加载优先级（同项目注册表）：
+1. 文件 `BUGFIX_ALLOWLIST_FILE`（默认 `bugfix-allowlist.json`，git 忽略），内容为 open_id 字符串数组；
+2. 否则环境变量 `BUGFIX_ALLOWLIST`（逗号/空白分隔）；
+3. 都没有 → 空名单。
+
+```json
+["ou_xxxxxxxxopenid1", "ou_xxxxxxxxopenid2"]
+```
+
+- **fail-closed**：空名单时**拒绝所有人**修改代码（启动日志会告警）。不在名单 → 卡片回「⛔ 你没有修改代码的权限…」并记审计日志。
+- 获取某人 open_id：让其给机器人发一条消息，看控制台 `[消息] from=ou_...` 即是。
 
 ## 3. `.env.example`（实现期产出）
 

@@ -8,9 +8,10 @@ dist/
 .env
 .env.local
 
-# local registry / mapping (machine-specific paths, ignored)
+# local registry / mapping / authorization (machine-specific, ignored)
 projects.json
 usermap.json
+bugfix-allowlist.json
 
 # logs
 *.log

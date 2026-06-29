@@ -11,9 +11,10 @@ describe('buildClaudeArgs', () => {
     expect(args).not.toContain('acceptEdits');
   });
 
-  it('write 模式：允许编辑', () => {
+  it('write 模式：允许编辑并限定读+编辑工具', () => {
     const args = buildClaudeArgs({ cwd: '/x', prompt: 'fix bug', mode: 'write' });
     expect(args.join(' ')).toContain('--permission-mode acceptEdits');
+    expect(args.join(' ')).toContain('--allowedTools Read Grep Glob Edit Write MultiEdit');
   });
 
   it('prompt 作为独立参数传递（不拼 shell）', () => {

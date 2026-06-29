@@ -15,6 +15,7 @@ import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
 import { GitLabClient } from './gitlab/client';
+import { codeWriteAllowlist } from './auth/authorization';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -39,6 +40,10 @@ function main(): void {
       ? new GitLabClient(config.gitlab.baseUrl, config.gitlab.token)
       : null;
   logger.info(`GitLab MR     : ${gitlab ? config.gitlab.baseUrl : '未配置（Bug 修复将提示缺配置）'}`);
+  logger.info(
+    `Code-write 白名单: ${codeWriteAllowlist.length} 人` +
+      (codeWriteAllowlist.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
+  );
 
   const recognizer = new IntentRecognizer(llm, {
     model: config.llm.intentModel,
@@ -47,7 +52,7 @@ function main(): void {
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
     new CodeUnderstandingHandler(cliRunner),
-    new BugFixHandler(cliRunner, gitlab),
+    new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist),
     new KnowledgeQaHandler(),
   ]);
   const controller = new MessageController(recognizer, registry);

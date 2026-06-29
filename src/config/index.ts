@@ -54,7 +54,12 @@ export const config = {
   cli: {
     provider: str('CLI_PROVIDER', 'claude'),
     bin: str('CLI_BIN'),
+    // 只读代码理解超时（默认 5 分钟）。
     timeoutMs: int('CLI_TIMEOUT_MS', 300000),
+    // Bug 修复（写）超时（默认 20 分钟，定位+修改更耗时）。
+    bugfixTimeoutMs: int('BUGFIX_TIMEOUT_MS', 1200000),
+    // Bug 修复 worktree 基目录（默认系统临时目录）。会展开为长路径，避开 Windows 8.3 短名。
+    worktreeDir: str('WORKTREE_DIR'),
   },
   gitlab: {
     baseUrl: str('GITLAB_BASE_URL'),

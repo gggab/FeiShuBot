@@ -21,7 +21,8 @@ export function buildClaudeArgs(task: CliTask): string[] {
   if (task.mode === 'read') {
     args.push('--allowedTools', 'Read', 'Grep', 'Glob');
   } else {
-    args.push('--permission-mode', 'acceptEdits');
+    // 写模式：自动批准编辑，并限定为读+编辑工具，避免尝试 Bash/构建（被拒会空耗时间，甚至触发超时）。
+    args.push('--permission-mode', 'acceptEdits', '--allowedTools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit');
   }
   return args;
 }

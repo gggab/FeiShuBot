@@ -3,6 +3,7 @@
  * 设计对齐 docs/handlers.md §3。
  */
 
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Handler, HandlerContext } from './types';
@@ -11,9 +12,26 @@ import { GitWorkspace } from '../git/workspace';
 import { GitLabClient } from '../gitlab/client';
 import { resolveProject } from './resolve-project';
 import { projects, getGitlabUser } from '../config/projects';
+import { canModifyCode } from '../auth/authorization';
 import { config } from '../config';
 import { logger } from '../util/logger';
 import { buildFixBranch, buildCommitMessage, buildBugfixPrompt, buildMrDescription } from './bugfix-naming';
+
+/**
+ * worktree 基目录，并展开为长路径。
+ * Windows 下 os.tmpdir() 常是 8.3 短名（如 C:\Users\LIAOWE~1\...），Claude 安全策略会
+ * 把含 `~` 的路径标记为可疑并拦截所有写入工具，导致"无改动"。realpath.native 展开为长名规避。
+ */
+function resolveWorktreeBase(): string {
+  let base = config.cli.worktreeDir && config.cli.worktreeDir.trim() !== '' ? config.cli.worktreeDir : os.tmpdir();
+  try {
+    fs.mkdirSync(base, { recursive: true });
+    base = fs.realpathSync.native(base);
+  } catch (e) {
+    logger.warn(`[Bug修复] 处理 worktree 基目录失败，沿用原值: ${(e as Error).message}`);
+  }
+  return base;
+}
 
 export class BugFixHandler implements Handler {
   readonly intent = 'bug_fix' as const;
@@ -23,10 +41,20 @@ export class BugFixHandler implements Handler {
 
   constructor(
     private readonly runner: CliRunner,
-    private readonly gitlab: GitLabClient | null
+    private readonly gitlab: GitLabClient | null,
+    private readonly allowlist: string[]
   ) {}
 
   async handle(ctx: HandlerContext): Promise<void> {
+    // 权限强制校验：仅白名单用户可触发"修改代码"。
+    if (!canModifyCode(ctx.userId, this.allowlist)) {
+      logger.warn(`[权限] 拒绝修改代码请求 user=${ctx.userId} task="${ctx.intent.task}"`);
+      await ctx.reply.done(
+        '⛔ 你没有修改代码的权限。\n「Bug 修复 / 修改代码」仅限授权人员，如需开通请联系管理员。'
+      );
+      return;
+    }
+
     const resolved = resolveProject(ctx.intent.project, projects);
     if (!resolved.ok) {
       await ctx.reply.done(resolved.message);
@@ -52,7 +80,7 @@ export class BugFixHandler implements Handler {
     this.locks.add(proj.path);
 
     const branch = buildFixBranch(ctx.intent.task, config.gitlab.fixBranchPrefix);
-    const worktree = path.join(os.tmpdir(), `feishubot-fix-${Date.now().toString(36)}`);
+    const worktree = path.join(resolveWorktreeBase(), `feishubot-fix-${Date.now().toString(36)}`);
     const ws = new GitWorkspace(proj.path);
     let worktreeCreated = false;
 
@@ -64,15 +92,16 @@ export class BugFixHandler implements Handler {
       await ws.createWorktree(worktree, branch, baseBranch);
       worktreeCreated = true;
 
-      ctx.reply.push(`② 切分支 ${branch}，调用 Claude 修复（详见控制台）…\n`);
+      ctx.reply.push(`② 切分支 ${branch}，调用 Claude 修复（可能需要数分钟，处理过程见控制台）…\n\n`);
       let summary = '';
       for await (const chunk of this.runner.run({
         cwd: worktree,
         prompt: buildBugfixPrompt(ctx.intent.task),
         mode: 'write',
-        timeoutMs: config.cli.timeoutMs,
+        timeoutMs: config.cli.bugfixTimeoutMs,
       })) {
         summary += chunk;
+        ctx.reply.push(chunk);
       }
 
       const changed = await ws.changedFiles(worktree);
