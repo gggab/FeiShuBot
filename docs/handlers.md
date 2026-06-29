@@ -50,29 +50,33 @@ interface Handler {
 
 ```
 1. 解析项目  → ProjectRegistry 得到 { 本地仓库路径, GitLab 项目, 测试分支名 }
-2. 准备工作区 → git fetch；checkout 测试分支(baseBranch)；git pull 到最新
-3. 切修复分支 → git checkout -b fix/<slug>-<shortId>   （从测试分支切出）
-4. CLI 修复   → CliRunner.run({ cwd, prompt, mode:'write' })
-               prompt 要求：定位根因 → 修复 → 自验证（AGENTS.md Bug 工作流）
-               过程 stdout 流式回卡片
-5. 提交       → git add -A；git commit -m "fix: <subject>"  （AGENTS.md 提交规范）
-               若无改动则显式回报「未产生修改」并清理分支，不创建空 MR
-6. 推送       → git push -u origin fix/<slug>-<shortId>
-7. 建 MR      → 调 GitLab API 创建 Merge Request：
+2. 准备工作区 → git fetch origin；在【临时 worktree】中基于 origin/<baseBranch>
+               创建 fix 分支（git worktree add <tmp> -b fix/... origin/<baseBranch>）。
+               ★ 关键：用 worktree 隔离，绝不动用户当前已检出的工作区/分支/未提交改动。
+3. CLI 修复   → CliRunner.run({ cwd: worktree, prompt, mode:'write' })
+               claude --permission-mode acceptEdits，仅在 worktree 内改文件。
+               处理过程打印到控制台；改动摘要收集后用于卡片/MR。
+4. 提交       → 在 worktree 内 git add -A；git commit -m "fix: <subject>"
+               若无改动则显式回报「未产生修改」并清理 worktree/分支，不创建空 MR。
+5. 推送       → git push -u origin fix/<slug>-<shortId>（用用户已有 SSH 凭据）
+6. 建 MR      → 调 GitLab API 创建 Merge Request：
                source = 修复分支, target = 测试分支(baseBranch)
                title/description 含 bug 描述、改动摘要、触发人
-               assignee/reviewer = 任务发起人对应的 GitLab 用户
-8. 回卡片     → 返回 MR 链接 + 摘要；提示「已提交 MR，请 review」
+               assignee = 任务发起人对应的 GitLab 用户
+7. 回卡片     → 返回 MR 链接 + 摘要；提示「已提交 MR，请 review」
+8. 清理       → finally 中 git worktree remove --force + 删除本地分支（remote 已有）
 ```
 
 关键设计点：
-- **基线分支**：从项目注册表里配置的「测试分支」（`baseBranch`，如 `test`/`develop`）切出与合回，不是 `main`。
-- **任务发起人 → reviewer**：需要「飞书用户 → GitLab 用户」映射（见 [configuration.md](configuration.md) 的用户映射表）。映射缺失时：MR 照建，但 assignee 留空并在卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。
-- **分支命名**：`fix/<task-slug>-<shortId>`，slug 由 `intent.task` 归一化，`shortId` 防冲突。
-- **幂等/清理**：CLI 未产生改动 → 不建 MR、删除临时分支；任一步失败 → `reply.fail` 并尽量回滚工作区（切回 baseBranch），不留脏分支。
-- **并发**：同一项目的 Git 工作区同一时刻只允许一个 Bug 任务（仓库级锁），避免分支/工作区冲突。
-- **凭据**：Git push 用项目配置的凭据/部署密钥；GitLab MR 用 `GITLAB_TOKEN`（见配置）。
-- **自验证**：prompt 要求 CLI 跑项目自带校验（如 `yarn type-check`/测试）；结果写入 MR 描述，但不阻断 MR 创建（review 由人把关）。
+- **worktree 隔离**：所有改动发生在 `os.tmpdir()` 下的临时 worktree，基于 `origin/<baseBranch>`。用户本地仓库的当前分支、未提交改动、node_modules 完全不受影响（最重要的安全保证）。
+- **基线分支**：项目注册表的 `baseBranch`（如 `develop`/`release`），缺省取 `GIT_DEFAULT_BASE_BRANCH`。
+- **任务发起人 → reviewer**：需要「飞书 open_id → GitLab 用户」映射（见 [configuration.md](configuration.md) §2.1）。映射缺失：MR 照建，assignee 留空并在卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。
+- **前置校验**：项目无 `gitlabProjectId` 或未配置 `GITLAB_BASE_URL`/`GITLAB_TOKEN` → 显式拒绝，不进入流程。
+- **分支命名**：`fix/<task-slug>-<shortId>`，slug 由 `intent.task` 归一化（中文任务回退 `auto`），`shortId` 防冲突。
+- **幂等/清理**：无改动 → 不建 MR、删 worktree/分支；任一步失败 → `reply.fail`，finally 仍清理 worktree/分支，不留脏分支。
+- **并发**：同一仓库路径同一时刻只允许一个 Bug 任务（仓库级锁）。
+- **凭据**：`git push` 走用户已有 SSH key（remote 为 SSH）；GitLab MR 用 `GITLAB_TOKEN`。
+- **写模式工具**：`acceptEdits` 自动批准编辑、`-p` 下 Bash 被自动拒绝（不跑构建/测试），改动范围受限更安全；自验证留待人在 MR review。
 
 > 默认 CLI 为 `claude`（Claude Code），可经 `CLI_PROVIDER` 切换为 `codex`。
 

@@ -14,6 +14,7 @@ import { buildDispatcher } from './feishu/dispatcher';
 import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
+import { GitLabClient } from './gitlab/client';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -32,6 +33,13 @@ function main(): void {
   const llm = createLlmClient();
   const cliRunner = getCliRunner();
   logger.info(`CLI runner    : ${cliRunner.name} (bin: ${config.cli.bin || cliRunner.name})`);
+
+  const gitlab =
+    config.gitlab.baseUrl && config.gitlab.token
+      ? new GitLabClient(config.gitlab.baseUrl, config.gitlab.token)
+      : null;
+  logger.info(`GitLab MR     : ${gitlab ? config.gitlab.baseUrl : '未配置（Bug 修复将提示缺配置）'}`);
+
   const recognizer = new IntentRecognizer(llm, {
     model: config.llm.intentModel,
     minConfidence: config.llm.intentMinConfidence,
@@ -39,7 +47,7 @@ function main(): void {
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
     new CodeUnderstandingHandler(cliRunner),
-    new BugFixHandler(),
+    new BugFixHandler(cliRunner, gitlab),
     new KnowledgeQaHandler(),
   ]);
   const controller = new MessageController(recognizer, registry);

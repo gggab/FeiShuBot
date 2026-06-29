@@ -47,15 +47,15 @@
 - 注意：Windows 下 `CLI_BIN` 需填 `claude.exe` 绝对路径（spawn 不走 PATHEXT）。
 - 待人工冒烟：飞书内问「portal 的登录怎么实现」，观察卡片流式给出解释。
 
-#### M4b — Bug 修复（GitLab MR 流程）⏳ 待做
-- `BugFixHandler` + `git/`（工作区准备、切分支、提交、推送）+ `gitlab/`（创建 MR）：
-  从测试分支切 `fix/*` → CLI 修复 → commit → push → 建 MR → 指派发起人。
-- 需先备齐：`GITLAB_BASE_URL` / `GITLAB_TOKEN` / `USER_MAP_JSON`。
-- 验收：
-  - Bug 修复能从 baseBranch 切分支、提交、推送、建出 MR，target=baseBranch，回卡片给 MR 链接。
-  - 无改动时不建空 MR 并清理分支；失败时回滚工作区、不留脏分支。
-  - 用户映射命中→指派 reviewer；未命中→MR 照建并显式提示。
-  - 同项目并发被仓库级锁串行化。
+#### M4b — Bug 修复（GitLab MR 流程）✅（2026-06-29 完成）
+- `git/run.ts`（execFile git）+ `git/workspace.ts`（**worktree 隔离**：fetch / createWorktree(基于 origin/baseBranch) / hasChanges / changedFiles / commitAll / push / cleanup）。
+- `gitlab/client.ts`（`createMergeRequest` + `buildMergeRequestUrl`，PRIVATE-TOKEN）。
+- `handlers/bugfix-naming.ts`（slug/分支名/提交信息/提示词/MR 描述，纯函数）。
+- `BugFixHandler`：解析项目（需 `gitlabProjectId` + 已配 GitLab）→ 仓库级锁 → worktree 修复 → 无改动则取消清理 → commit/push → 建 MR（指派发起人）→ 回卡片 MR 链接；finally 清理 worktree/分支。
+- 测试：`bugfix-naming`(5) + `gitlab/client`(2) + `git/workspace` 本地裸仓库集成(1) = 8 新增，合计 **50 项全通过**。
+- 验收：`yarn type-check`/`yarn test` 0 报错；worktree 集成测试证明改动走临时 worktree、**用户工作区分支不受影响**、push 到 origin、cleanup 干净。
+- 已确认运行时配置就绪：启动日志显示 `GitLab MR: https://gitlab.sz.sensetime.com`、CLI bin 已配。
+- 待人工冒烟（真实外发，由用户在飞书触发）：报一个具体 bug → 观察卡片 ①②③④ 进度 + 控制台 Claude 处理 → 拿到 MR 链接；`USER_MAP_JSON` 配好则自动指派 reviewer。
 
 ### M5 — 知识问答占位
 - `knowledge/dify.ts` 接口 + `KnowledgeQAHandler` 显式「未接入」提示。
