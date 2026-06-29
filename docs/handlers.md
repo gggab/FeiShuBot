@@ -81,16 +81,20 @@ interface Handler {
 
 > 默认 CLI 为 `claude`（Claude Code），可经 `CLI_PROVIDER` 切换为 `codex`。
 
-## 4. KnowledgeQAHandler（知识问答）— 本期占位
+## 4. KnowledgeQAHandler（知识问答）— 接入本地 Dify
 
 目的：回答文档型问题（使用说明、配置、特殊情况）。
 
-本期实现：
-- `knowledge/dify.ts` 仅提供接口与占位实现，`handle()` 返回明确提示：「知识库（Dify）尚未接入，当前无法回答文档型问题；如需了解实现细节，可改问代码理解。」——显式告知，不静默退化。
+实现：
+- `knowledge/dify.ts` 的 `DifyClient` 调本地 Dify 的 `POST {DIFY_BASE_URL}/chat-messages`（chatflow/advanced-chat 应用，`app-` 应用密钥，`response_mode: blocking`）。
+- 请求体：`{ inputs:{}, query: intent.task, response_mode:'blocking', user: 飞书userId, conversation_id? }`。
+- 解析响应 `answer`；`metadata.retriever_resources[].document_name` 作为「参考来源」附在卡片末尾（去重）。
+- **多轮**：按用户保存 Dify 返回的 `conversation_id`，下次带上以保持上下文。
+- 未配置（缺 `DIFY_BASE_URL`/`DIFY_API_KEY`）→ 显式提示「知识库未配置」，不静默退化。
+- 失败（HTTP 非 2xx / 网络）→ `reply.fail` 显式报错。
 
-未来设计（写明方向，便于后续实现，不在本期编码）：
-- 调用本地部署 Dify 的对话/检索 API（OpenAI 兼容或 Dify 原生 `/v1/chat-messages`）。
-- 命中不足/置信度低时，**可选叠加一次源码阅读**：转交 CodeUnderstandingHandler 的只读 CLI 流程补充实现细节，再合并作答。这条「Dify + 源码」的联动是 §intent 中「问及实现细节时同步查看源码」的落点。
+后续可选增强（暂不实现）：
+- 命中不足时**叠加一次源码阅读**：转交 CodeUnderstandingHandler 的只读 CLI 补充实现细节再合并作答（§intent「问及实现细节时同步查看源码」的落点）。
 
 ## 5. ChatHandler（普通聊天）
 

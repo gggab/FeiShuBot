@@ -44,11 +44,13 @@ BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发
 | `GIT_DEFAULT_BASE_BRANCH` | | `test` | 项目未单独配置时的默认测试分支 |
 | `FIX_BRANCH_PREFIX` | | `fix/` | 修复分支前缀 |
 
-### 知识库（本期占位）
+### 知识库（Dify）
 | 变量 | 必填 | 默认 | 说明 |
 |------|------|------|------|
-| `DIFY_BASE_URL` | | — | 本期未接入，留空即可 |
-| `DIFY_API_KEY` | | — | 同上 |
+| `DIFY_BASE_URL` | 知识问答用到时 | — | Dify API 基址，含 `/v1`，如 `http://172.20.14.199/v1` |
+| `DIFY_API_KEY` | 同上 | — | Dify 应用 API Key（`app-` 前缀，chatflow/advanced-chat 应用） |
+
+未配置时知识问答显式提示「未配置」，不影响其它意图。
 
 ### 服务
 | 变量 | 必填 | 默认 | 说明 |

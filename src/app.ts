@@ -15,6 +15,7 @@ import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
 import { GitLabClient } from './gitlab/client';
+import { DifyClient } from './knowledge/dify';
 import { codeWriteAllowlist } from './auth/authorization';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
@@ -45,6 +46,10 @@ function main(): void {
       (codeWriteAllowlist.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
   );
 
+  const dify =
+    config.dify.baseUrl && config.dify.apiKey ? new DifyClient(config.dify.baseUrl, config.dify.apiKey) : null;
+  logger.info(`Dify 知识库   : ${dify ? config.dify.baseUrl : '未配置（知识问答将提示缺配置）'}`);
+
   const recognizer = new IntentRecognizer(llm, {
     model: config.llm.intentModel,
     minConfidence: config.llm.intentMinConfidence,
@@ -53,7 +58,7 @@ function main(): void {
     new ChatHandler(llm),
     new CodeUnderstandingHandler(cliRunner),
     new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist),
-    new KnowledgeQaHandler(),
+    new KnowledgeQaHandler(dify),
   ]);
   const controller = new MessageController(recognizer, registry);
   const dispatcher = buildDispatcher((msg) => controller.handle(msg));

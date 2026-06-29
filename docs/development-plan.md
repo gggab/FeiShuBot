@@ -57,9 +57,12 @@
 - 已确认运行时配置就绪：启动日志显示 `GitLab MR: https://gitlab.sz.sensetime.com`、CLI bin 已配。
 - 待人工冒烟（真实外发，由用户在飞书触发）：报一个具体 bug → 观察卡片 ①②③④ 进度 + 控制台 Claude 处理 → 拿到 MR 链接；`USER_MAP_JSON` 配好则自动指派 reviewer。
 
-### M5 — 知识问答占位
-- `knowledge/dify.ts` 接口 + `KnowledgeQAHandler` 显式「未接入」提示。
-- 验收：`knowledge_qa` 意图返回明确占位说明，不报错、不静默退化。
+### M5 — 知识问答（接入本地 Dify）✅（2026-06-29 完成）
+- `knowledge/dify.ts`：`DifyClient.chat`（`POST {DIFY_BASE_URL}/chat-messages`，blocking）+ `parseDifyAnswer`（答案/会话id/去重引用，剥离 `<think>` 推理块）+ `buildChatMessagesUrl`。
+- `KnowledgeQaHandler`：调 Dify，按用户维护 `conversation_id` 多轮；附「📎 参考」引用；未配置/失败显式提示，不静默。
+- 测试：`knowledge/dify`(6，含 URL/解析/think 剥离/fetch mock 成功与 401) ，合计 **61 项全通过**。
+- 验收：`yarn type-check`/`yarn test` 0 报错；live 调通自建 Dify（`http://172.20.14.199/v1`，advanced-chat 应用），答案+会话id 正确解析，`<think>` 已剥离。
+- 待人工冒烟：飞书问文档型问题（如「xx 怎么配置/部署」），观察知识库作答与参考来源。
 
 ### M6 — 健壮化
 - 统一错误处理与日志、并发保护、配置校验失败即退出。
