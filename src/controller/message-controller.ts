@@ -47,7 +47,9 @@ export class MessageController {
     if (!text) return;
 
     const session = getSession(msg.userId);
-    logger.info(`[消息] from=${msg.userId} text="${truncate(text)}" (历史 ${session.getHistory().length} 条)`);
+    logger.info(
+      `[消息] from=${msg.userId} chat=${msg.chatId} text="${truncate(text)}" (历史 ${session.getHistory().length} 条)`
+    );
 
     if (text.startsWith('/clear')) {
       session.clear();

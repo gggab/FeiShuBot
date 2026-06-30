@@ -17,7 +17,12 @@ import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
 import { GitLabClient } from './gitlab/client';
 import { DifyClient } from './knowledge/dify';
-import { codeWriteAllowlist, allowedDepartments } from './auth/authorization';
+import {
+  codeWriteAllowlist,
+  allowedDepartments,
+  codeReadAllowlist,
+  codeReadAllowedChats,
+} from './auth/authorization';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -62,6 +67,10 @@ function main(): void {
     `Code-write 授权: open_id 白名单 ${codeWriteAllowlist.length} 人 / 部门白名单 ${allowedDepartments.length} 个` +
       (codeWriteAllowlist.length === 0 && allowedDepartments.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
   );
+  logger.info(
+    `Code-read 授权: 群白名单 ${codeReadAllowedChats.length} 个 / open_id 白名单 ${codeReadAllowlist.length} 人` +
+      (codeReadAllowedChats.length === 0 && codeReadAllowlist.length === 0 ? '（空：所有人将被拒绝阅读源码）' : '')
+  );
 
   const dify =
     config.dify.baseUrl && config.dify.apiKey ? new DifyClient(config.dify.baseUrl, config.dify.apiKey) : null;
@@ -73,7 +82,7 @@ function main(): void {
   });
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
-    new CodeUnderstandingHandler(cliRunner),
+    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats),
     new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),
   ]);

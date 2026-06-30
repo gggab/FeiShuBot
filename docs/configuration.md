@@ -132,6 +132,23 @@ BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书
 GitLab 查找先按完整邮箱搜（仅公开邮箱/管理员 token 有效），搜不到再按**邮箱前缀（通常= GitLab 用户名）**搜。都未命中 → 卡片提示手动指定。
 > 运行时前提：应用（tenant）身份能读到该用户的 email（需通讯录字段权限）。
 
+## 2.3 代码理解访问授权（群 / 人白名单，强制校验）
+
+「代码理解 / 阅读源码」会调用本地 CLI 只读读取注册项目的源码，**只有授权的群或人员可触发**。`CodeUnderstandingHandler` 入口强制校验（`isAuthorizedToRead`）：
+
+> **消息所在群 `chat_id` 在群白名单** 或 **触发人 `open_id` 在人员白名单** → 放行；两者皆空 → **fail-closed 拒绝所有人**。
+
+只按「群 / 人」两个维度，不涉及部门，因此**无需通讯录读权限**。配置（均：文件 > 内联 env > 空）：
+
+| 维度 | 文件（git 忽略） | env | 内容 |
+|------|------|-----|------|
+| 群白名单 | `code-read-allowed-chats.json`（`CODE_READ_ALLOWED_CHATS_FILE`） | `CODE_READ_ALLOWED_CHATS` | `chat_id` 数组（群里任何人可阅读源码） |
+| open_id 白名单 | `code-read-allowlist.json`（`CODE_READ_ALLOWLIST_FILE`） | `CODE_READ_ALLOWLIST` | open_id 数组（个人，含单聊/任意群） |
+
+- 取 `chat_id`：用户在目标群发条消息后，控制台 `[消息]` 日志含 `chat=oc_...`；把允许的群 id 填入群白名单。
+- 取 open_id：同上看 `from=ou_...`。
+- 与「代码修改授权」相互独立：阅读源码只看本节两份名单；修改代码看 §2.2。
+
 ## 3. `.env.example`（实现期产出）
 
 ```dotenv
@@ -158,6 +175,13 @@ GITLAB_BASE_URL=
 GITLAB_TOKEN=
 GIT_DEFAULT_BASE_BRANCH=test
 FIX_BRANCH_PREFIX=fix/
+
+# Code-understanding (read source) access authorization (fail-closed: both empty => nobody may read).
+# Either the message chat_id (group) or the triggering open_id (person) must be allowlisted.
+CODE_READ_ALLOWED_CHATS_FILE=code-read-allowed-chats.json
+CODE_READ_ALLOWED_CHATS=
+CODE_READ_ALLOWLIST_FILE=code-read-allowlist.json
+CODE_READ_ALLOWLIST=
 
 # Dify (not wired yet)
 DIFY_BASE_URL=

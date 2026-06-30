@@ -13,6 +13,8 @@ projects.json
 usermap.json
 bugfix-allowlist.json
 bugfix-allowed-departments.json
+code-read-allowlist.json
+code-read-allowed-chats.json
 
 # logs
 *.log

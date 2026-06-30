@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canModifyCode, parseAllowlistEnv, isAuthorizedToModify } from '../../src/auth/authorization';
+import { canModifyCode, parseAllowlistEnv, isAuthorizedToModify, isAuthorizedToRead } from '../../src/auth/authorization';
 
 describe('canModifyCode (open_id, fail-closed)', () => {
   it('名单内 → 允许；名单外/空名单 → 拒绝', () => {
@@ -41,6 +41,32 @@ describe('isAuthorizedToModify (部门为主 + open_id 兜底，fail-closed)', (
   it('两者皆空 → 拒绝所有人（fail-closed）', () => {
     expect(
       isAuthorizedToModify({ userId: 'ou_a', departmentIds: ['od-dev'], openIdAllowlist: [], allowedDepartments: [] })
+    ).toBe(false);
+  });
+});
+
+describe('isAuthorizedToRead (群 chat_id 或 人 open_id，fail-closed)', () => {
+  it('open_id 命中 → 允许', () => {
+    expect(
+      isAuthorizedToRead({ userId: 'ou_a', chatId: 'oc_x', openIdAllowlist: ['ou_a'], allowedChats: [] })
+    ).toBe(true);
+  });
+
+  it('chat_id 命中 → 允许（群内任何人）', () => {
+    expect(
+      isAuthorizedToRead({ userId: 'ou_stranger', chatId: 'oc_dev', openIdAllowlist: [], allowedChats: ['oc_dev'] })
+    ).toBe(true);
+  });
+
+  it('都不命中 → 拒绝', () => {
+    expect(
+      isAuthorizedToRead({ userId: 'ou_x', chatId: 'oc_y', openIdAllowlist: ['ou_a'], allowedChats: ['oc_dev'] })
+    ).toBe(false);
+  });
+
+  it('两者皆空 → 拒绝所有人（fail-closed）', () => {
+    expect(
+      isAuthorizedToRead({ userId: 'ou_a', chatId: 'oc_x', openIdAllowlist: [], allowedChats: [] })
     ).toBe(false);
   });
 });

@@ -31,6 +31,8 @@ interface Handler {
 
 目的：只读地阅读项目代码并解释实现逻辑/细节。
 
+**权限强制校验（fail-closed）**：`handle()` 第一步校验 `isAuthorizedToRead({ userId, chatId, ... })`——消息所在群 `chat_id` 命中群白名单 **或** 触发人 `open_id` 命中人员白名单才放行；两份名单皆空 → 拒绝所有人。不命中 → 卡片回「⛔ 无权限」并记审计日志，不进入阅读流程。只按「群 / 人」维度，不涉及部门（无需通讯录权限）。配置见 [configuration.md](configuration.md) §2.3。
+
 流程：
 1. 解析目标项目：`ctx.intent.project` → `ProjectRegistry.resolve()` 得到绝对路径。
    - 无 `project` 且注册表只有一个项目 → 用默认项目。

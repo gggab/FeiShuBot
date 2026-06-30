@@ -7,6 +7,7 @@ import { Handler, HandlerContext } from './types';
 import { CliRunner } from '../cli/runner';
 import { resolveProject } from './resolve-project';
 import { projects } from '../config/projects';
+import { isAuthorizedToRead } from '../auth/authorization';
 import { config } from '../config';
 import { logger } from '../util/logger';
 
@@ -23,9 +24,32 @@ function buildPrompt(task: string): string {
 export class CodeUnderstandingHandler implements Handler {
   readonly intent = 'code_understanding' as const;
 
-  constructor(private readonly runner: CliRunner) {}
+  constructor(
+    private readonly runner: CliRunner,
+    private readonly openIdAllowlist: string[],
+    private readonly allowedChats: string[]
+  ) {}
+
+  /** 群白名单 或 个人白名单命中即放行；两者皆空 → 拒绝（fail-closed）。 */
+  private isAuthorized(userId: string, chatId: string): boolean {
+    return isAuthorizedToRead({
+      userId,
+      chatId,
+      openIdAllowlist: this.openIdAllowlist,
+      allowedChats: this.allowedChats,
+    });
+  }
 
   async handle(ctx: HandlerContext): Promise<void> {
+    // 权限强制校验：仅授权的群或人员可触发"阅读源码"。
+    if (!this.isAuthorized(ctx.userId, ctx.chatId)) {
+      logger.warn(`[权限] 拒绝阅读源码请求 user=${ctx.userId} chat=${ctx.chatId} task="${ctx.intent.task}"`);
+      await ctx.reply.done(
+        '⛔ 你没有阅读源码的权限。\n「代码理解 / 阅读源码」仅限授权的群或人员，如需开通请联系管理员。'
+      );
+      return;
+    }
+
     const resolved = resolveProject(ctx.intent.project, projects);
     if (!resolved.ok) {
       await ctx.reply.done(resolved.message);
