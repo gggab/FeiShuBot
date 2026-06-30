@@ -12,6 +12,7 @@ dist/
 projects.json
 usermap.json
 bugfix-allowlist.json
+bugfix-allowed-departments.json
 
 # logs
 *.log

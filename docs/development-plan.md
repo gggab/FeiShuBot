@@ -64,9 +64,39 @@
 - 验收：`yarn type-check`/`yarn test` 0 报错；live 调通自建 Dify（`http://172.20.14.199/v1`，advanced-chat 应用），答案+会话id 正确解析，`<think>` 已剥离。
 - 待人工冒烟：飞书问文档型问题（如「xx 怎么配置/部署」），观察知识库作答与参考来源。
 
-### M6 — 健壮化
-- 统一错误处理与日志、并发保护、配置校验失败即退出。
-- 验收：异常路径都有显式用户提示 + 日志；无静默吞错。
+### M6 — 部门级权限 + 用户信息自动化 + 配置健壮性 ✅（2026-06-30 实现）
+
+本轮范围 = A + B + C + D（2026-06-29 与用户确认；E/F 顺延）。
+代码与单测已完成（`yarn type-check`/`yarn test` 67 项全过，新增 contact 缓存/部门授权/GitLab 邮箱查询测试）。
+**待运行时**：A/B/C 真跑需后台开通 `contact:contact.base:readonly`；未开通时 open_id 白名单兜底、reviewer 回退手填。
+
+#### A — 通讯录服务 + 用户缓存
+- `feishu/contact.ts`：用 `client.contact.v3.user.get(open_id, user_id_type=open_id)` 拉取
+  `{ name, email, departmentIds }`，带 TTL 缓存（如 30 分钟），失败显式抛错。
+- 是 B/C 的基础。**前置**：开发者后台为应用申请通讯录读权限（`contact:user.base:readonly`
+  + 读邮箱/部门的相应 scope），并设置应用可见范围能看到这些人。
+
+#### B — 部门级权限（部门白名单为主，open_id 白名单兜底）
+- `auth/authorization.ts` 扩展：`canModifyCode` 改为「用户部门 ∩ 允许部门集合 ≠ ∅ **或** open_id 在白名单」。
+- 新增配置 `BUGFIX_ALLOWED_DEPARTMENTS`（部门 id 列表，文件或 env）。
+- 仍 fail-closed：两者都空 → 拒绝所有人。校验需要 A 解析用户部门。
+
+#### C — GitLab reviewer 自动映射（email 连接键）
+- `gitlab/client.ts` 增 `findUserByEmail`（`GET /api/v4/users?search=<email>`）。
+- BugFix 指派 reviewer：open_id →(A)→ email →(GitLab)→ gitlabUserId，带缓存；
+  命中不到再回退手填 `usermap.json`。**前提已确认：飞书邮箱 == GitLab 邮箱**。
+
+#### D — 配置健壮性
+- 启动即校验「核心必填」（`APP_ID`/`APP_SECRET`/`LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`），
+  缺失则打印明确错误并 `process.exit(1)`（不再拖到用到时才报）。
+- 功能型配置（GitLab/Dify/通讯录）仍按需校验 + 启动告警。
+
+验收：`yarn type-check`/`yarn test` 0 报错；部门授权/自动映射有单测（mock 通讯录与 GitLab）；
+缺核心配置时启动直接失败退出；live 验证通讯录拉取与 email→GitLab 解析。
+
+#### 顺延（不在本轮）
+- E：全局并发闸 + LLM 429 退避。
+- F：会话/conversation 持久化或 LRU 淘汰（防内存只增）。
 
 ## 2. 测试策略
 

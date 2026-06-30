@@ -2,21 +2,22 @@
  * 应用入口。
  * Application entry point.
  *
- * M3：飞书长连接 → 意图识别 → 按四类意图路由（chat 为真实 LLM，其余为 M4/M5 占位）。
- * 见 docs/development-plan.md。
+ * 飞书长连接 → 意图识别 → 按四类意图路由（chat/代码理解/Bug 修复/知识问答）。
+ * 启动先校验核心必填配置，缺失即 exit(1)（M6-D）。见 docs/development-plan.md。
  */
 
-import { config } from './config';
+import { config, assertRequired } from './config';
 import { listProjectAliases } from './config/projects';
 import { logger } from './util/logger';
 import { larkWsClient } from './feishu/client';
 import { buildDispatcher } from './feishu/dispatcher';
+import { ContactService, createLarkUserFetcher } from './feishu/contact';
 import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
 import { GitLabClient } from './gitlab/client';
 import { DifyClient } from './knowledge/dify';
-import { codeWriteAllowlist } from './auth/authorization';
+import { codeWriteAllowlist, allowedDepartments } from './auth/authorization';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -24,8 +25,21 @@ import { CodeUnderstandingHandler } from './handlers/code-understanding';
 import { BugFixHandler } from './handlers/bug-fix';
 import { KnowledgeQaHandler } from './handlers/knowledge-qa';
 
+/** 核心必填配置：缺任一项无法提供基础能力（收发消息 + 意图/聊天）。 */
+function validateCoreConfig(): void {
+  assertRequired([
+    ['APP_ID', config.feishu.appId],
+    ['APP_SECRET', config.feishu.appSecret],
+    ['LLM_BASE_URL', config.llm.baseUrl],
+    ['LLM_API_KEY', config.llm.apiKey],
+    ['LLM_MODEL', config.llm.model],
+  ]);
+}
+
 function main(): void {
-  logger.info('FeiShuBot starting (M3 intent routing)');
+  validateCoreConfig();
+
+  logger.info('FeiShuBot starting (M6)');
   logger.info(`Feishu domain : ${config.feishu.domain}`);
   logger.info(`LLM provider  : ${config.llm.provider} (chat: ${config.llm.model}, intent: ${config.llm.intentModel})`);
   logger.info(`CLI provider  : ${config.cli.provider}`);
@@ -41,9 +55,12 @@ function main(): void {
       ? new GitLabClient(config.gitlab.baseUrl, config.gitlab.token)
       : null;
   logger.info(`GitLab MR     : ${gitlab ? config.gitlab.baseUrl : '未配置（Bug 修复将提示缺配置）'}`);
+
+  // 通讯录服务（A）：用于部门授权与 reviewer 自动映射；需应用具备 contact 读权限。
+  const contact = new ContactService(createLarkUserFetcher());
   logger.info(
-    `Code-write 白名单: ${codeWriteAllowlist.length} 人` +
-      (codeWriteAllowlist.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
+    `Code-write 授权: open_id 白名单 ${codeWriteAllowlist.length} 人 / 部门白名单 ${allowedDepartments.length} 个` +
+      (codeWriteAllowlist.length === 0 && allowedDepartments.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
   );
 
   const dify =
@@ -57,7 +74,7 @@ function main(): void {
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
     new CodeUnderstandingHandler(cliRunner),
-    new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist),
+    new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),
   ]);
   const controller = new MessageController(recognizer, registry);
@@ -67,4 +84,9 @@ function main(): void {
   logger.info('已启动飞书长连接，等待消息…（Ctrl+C 退出）');
 }
 
-main();
+try {
+  main();
+} catch (e) {
+  logger.error('启动失败: ' + (e as Error).message);
+  process.exit(1);
+}

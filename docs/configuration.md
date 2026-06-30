@@ -110,21 +110,27 @@ BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书
 - 命中 → MR 的 `assignee_id`/`reviewer_ids` 用对应 GitLab 用户。
 - 未命中 → MR 照建，assignee 留空，卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。
 
-## 2.2 代码修改授权白名单（强制校验）
+## 2.2 代码修改授权（部门为主 + open_id 兜底，强制校验）
 
-「修改代码 / Bug 修复」是写操作（会 push 分支、建 MR），**只有白名单内的飞书用户(open_id)可触发**；只读的代码理解不受限。在 `BugFixHandler` 入口强制校验（`src/auth/authorization.ts` 的 `canModifyCode`）。
+「修改代码 / Bug 修复」是写操作（push 分支、建 MR），**只有授权人员可触发**；只读代码理解不受限。`BugFixHandler` 入口强制校验（`isAuthorizedToModify`）：
 
-加载优先级（同项目注册表）：
-1. 文件 `BUGFIX_ALLOWLIST_FILE`（默认 `bugfix-allowlist.json`，git 忽略），内容为 open_id 字符串数组；
-2. 否则环境变量 `BUGFIX_ALLOWLIST`（逗号/空白分隔）；
-3. 都没有 → 空名单。
+> **用户部门 ∩ 允许部门 ≠ ∅** 或 **open_id 在白名单** → 放行；两者皆空 → **fail-closed 拒绝所有人**。
 
-```json
-["ou_xxxxxxxxopenid1", "ou_xxxxxxxxopenid2"]
-```
+配置（均：文件 > 内联 env > 空）：
 
-- **fail-closed**：空名单时**拒绝所有人**修改代码（启动日志会告警）。不在名单 → 卡片回「⛔ 你没有修改代码的权限…」并记审计日志。
-- 获取某人 open_id：让其给机器人发一条消息，看控制台 `[消息] from=ou_...` 即是。
+| 维度 | 文件（git 忽略） | env | 内容 |
+|------|------|-----|------|
+| 部门白名单（主） | `bugfix-allowed-departments.json`（`BUGFIX_ALLOWED_DEPARTMENTS_FILE`） | `BUGFIX_ALLOWED_DEPARTMENTS` | `open_department_id` 数组 |
+| open_id 白名单（兜底） | `bugfix-allowlist.json`（`BUGFIX_ALLOWLIST_FILE`） | `BUGFIX_ALLOWLIST` | open_id 数组 |
+
+- 部门校验需要**通讯录读权限**（A：`feishu/contact.ts`）。后台须为应用开通 **`contact:contact.base:readonly`**（或 `contact:contact:readonly`）并设可见范围；未开通时部门校验失败=拒绝，但 open_id 白名单仍可兜底放行。
+- 取部门 id：用户发条消息后，控制台 `[消息] from=ou_...`；A 接通后日志/调试可打印其 `departmentIds`，挑出研发部门 id 填入。
+- 取 open_id：同上看 `from=ou_...`。
+
+### reviewer 自动映射（C）
+建 MR 指派发起人：手填 `usermap.json` 优先；否则用通讯录邮箱 → GitLab 自动匹配。
+GitLab 查找先按完整邮箱搜（仅公开邮箱/管理员 token 有效），搜不到再按**邮箱前缀（通常= GitLab 用户名）**搜。都未命中 → 卡片提示手动指定。
+> 运行时前提：应用（tenant）身份能读到该用户的 email（需通讯录字段权限）。
 
 ## 3. `.env.example`（实现期产出）
 

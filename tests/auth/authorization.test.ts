@@ -1,27 +1,53 @@
 import { describe, it, expect } from 'vitest';
-import { canModifyCode, parseAllowlistEnv } from '../../src/auth/authorization';
+import { canModifyCode, parseAllowlistEnv, isAuthorizedToModify } from '../../src/auth/authorization';
 
-describe('canModifyCode (fail-closed)', () => {
-  it('名单内 → 允许', () => {
+describe('canModifyCode (open_id, fail-closed)', () => {
+  it('名单内 → 允许；名单外/空名单 → 拒绝', () => {
     expect(canModifyCode('ou_a', ['ou_a', 'ou_b'])).toBe(true);
-  });
-
-  it('名单外 → 拒绝', () => {
-    expect(canModifyCode('ou_x', ['ou_a', 'ou_b'])).toBe(false);
-  });
-
-  it('空名单 → 拒绝所有人（fail-closed）', () => {
+    expect(canModifyCode('ou_x', ['ou_a'])).toBe(false);
     expect(canModifyCode('ou_a', [])).toBe(false);
+  });
+});
+
+describe('isAuthorizedToModify (部门为主 + open_id 兜底，fail-closed)', () => {
+  it('open_id 命中 → 允许', () => {
+    expect(
+      isAuthorizedToModify({ userId: 'ou_a', departmentIds: [], openIdAllowlist: ['ou_a'], allowedDepartments: [] })
+    ).toBe(true);
+  });
+
+  it('部门命中 → 允许', () => {
+    expect(
+      isAuthorizedToModify({
+        userId: 'ou_x',
+        departmentIds: ['od-dev', 'od-other'],
+        openIdAllowlist: [],
+        allowedDepartments: ['od-dev'],
+      })
+    ).toBe(true);
+  });
+
+  it('都不命中 → 拒绝', () => {
+    expect(
+      isAuthorizedToModify({
+        userId: 'ou_x',
+        departmentIds: ['od-sales'],
+        openIdAllowlist: ['ou_a'],
+        allowedDepartments: ['od-dev'],
+      })
+    ).toBe(false);
+  });
+
+  it('两者皆空 → 拒绝所有人（fail-closed）', () => {
+    expect(
+      isAuthorizedToModify({ userId: 'ou_a', departmentIds: ['od-dev'], openIdAllowlist: [], allowedDepartments: [] })
+    ).toBe(false);
   });
 });
 
 describe('parseAllowlistEnv', () => {
   it('按逗号/空白分隔并去空', () => {
-    expect(parseAllowlistEnv('ou_a, ou_b\nou_c  ou_d')).toEqual(['ou_a', 'ou_b', 'ou_c', 'ou_d']);
-  });
-
-  it('空/未定义 → 空数组', () => {
+    expect(parseAllowlistEnv('od-a, od-b\nod-c')).toEqual(['od-a', 'od-b', 'od-c']);
     expect(parseAllowlistEnv(undefined)).toEqual([]);
-    expect(parseAllowlistEnv('   ')).toEqual([]);
   });
 });

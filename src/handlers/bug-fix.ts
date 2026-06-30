@@ -9,10 +9,11 @@ import path from 'path';
 import { Handler, HandlerContext } from './types';
 import { CliRunner } from '../cli/runner';
 import { GitWorkspace } from '../git/workspace';
-import { GitLabClient } from '../gitlab/client';
+import { GitLabClient, GitlabUserRef } from '../gitlab/client';
+import { ContactService } from '../feishu/contact';
 import { resolveProject } from './resolve-project';
 import { projects, getGitlabUser } from '../config/projects';
-import { canModifyCode } from '../auth/authorization';
+import { isAuthorizedToModify } from '../auth/authorization';
 import { config } from '../config';
 import { logger } from '../util/logger';
 import { buildFixBranch, buildCommitMessage, buildBugfixPrompt, buildMrDescription } from './bugfix-naming';
@@ -42,15 +43,56 @@ export class BugFixHandler implements Handler {
   constructor(
     private readonly runner: CliRunner,
     private readonly gitlab: GitLabClient | null,
-    private readonly allowlist: string[]
+    private readonly openIdAllowlist: string[],
+    private readonly allowedDepartments: string[],
+    private readonly contact: ContactService | null
   ) {}
 
+  /** 部门白名单为主、open_id 白名单兜底；部门校验失败按拒绝处理（fail-closed）。 */
+  private async isAuthorized(userId: string): Promise<boolean> {
+    if (this.openIdAllowlist.includes(userId)) return true;
+    if (this.allowedDepartments.length === 0 || !this.contact) return false;
+    try {
+      const user = await this.contact.getUser(userId);
+      return isAuthorizedToModify({
+        userId,
+        departmentIds: user.departmentIds,
+        openIdAllowlist: this.openIdAllowlist,
+        allowedDepartments: this.allowedDepartments,
+      });
+    } catch (e) {
+      logger.warn(`[权限] 部门校验失败(按拒绝处理): ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  /** reviewer：手填 usermap 优先，否则用通讯录邮箱自动匹配 GitLab 用户。 */
+  private async resolveReviewer(userId: string): Promise<GitlabUserRef | null> {
+    const manual = getGitlabUser(userId);
+    if (manual) return { id: manual.gitlabUserId, username: manual.gitlabUsername };
+    if (this.contact && this.gitlab) {
+      try {
+        const user = await this.contact.getUser(userId);
+        if (user.email) {
+          const gl = await this.gitlab.findUserByEmail(user.email);
+          if (gl) {
+            logger.info(`[Bug修复] 自动映射 reviewer: ${user.email} → @${gl.username}`);
+            return gl;
+          }
+        }
+      } catch (e) {
+        logger.warn(`[Bug修复] 自动解析 reviewer 失败: ${(e as Error).message}`);
+      }
+    }
+    return null;
+  }
+
   async handle(ctx: HandlerContext): Promise<void> {
-    // 权限强制校验：仅白名单用户可触发"修改代码"。
-    if (!canModifyCode(ctx.userId, this.allowlist)) {
+    // 权限强制校验：仅授权人员（按部门或 open_id 白名单）可触发"修改代码"。
+    if (!(await this.isAuthorized(ctx.userId))) {
       logger.warn(`[权限] 拒绝修改代码请求 user=${ctx.userId} task="${ctx.intent.task}"`);
       await ctx.reply.done(
-        '⛔ 你没有修改代码的权限。\n「Bug 修复 / 修改代码」仅限授权人员，如需开通请联系管理员。'
+        '⛔ 你没有修改代码的权限。\n「Bug 修复 / 修改代码」仅限授权人员（按部门或白名单），如需开通请联系管理员。'
       );
       return;
     }
@@ -119,19 +161,24 @@ export class BugFixHandler implements Handler {
       await ws.push(worktree, branch);
 
       ctx.reply.push('④ 创建 Merge Request…\n');
-      const gitlabUser = getGitlabUser(ctx.userId);
+      const reviewer = await this.resolveReviewer(ctx.userId);
       const mr = await this.gitlab.createMergeRequest({
         projectId: proj.gitlabProjectId,
         sourceBranch: branch,
         targetBranch: baseBranch,
         title: buildCommitMessage(ctx.intent.task),
-        description: buildMrDescription(ctx.intent.task, summary, ctx.userId, gitlabUser),
-        assigneeId: gitlabUser?.gitlabUserId,
+        description: buildMrDescription(
+          ctx.intent.task,
+          summary,
+          ctx.userId,
+          reviewer ? { gitlabUserId: reviewer.id, gitlabUsername: reviewer.username } : undefined
+        ),
+        assigneeId: reviewer?.id,
       });
 
-      const reviewerNote = gitlabUser
-        ? `已指派 @${gitlabUser.gitlabUsername} review`
-        : '⚠️ 未找到你的 GitLab 账号映射，请在 MR 中手动指定 reviewer';
+      const reviewerNote = reviewer
+        ? `已指派 @${reviewer.username} review`
+        : '⚠️ 未找到你的 GitLab 账号（手填映射/邮箱均未命中），请在 MR 中手动指定 reviewer';
       logger.info(`[Bug修复] 完成 MR=${mr.webUrl}`);
       await ctx.reply.done(
         `✅ 已为「${alias}」创建 Merge Request：\n${mr.webUrl}\n\n` +
