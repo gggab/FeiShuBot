@@ -46,14 +46,14 @@ export class MessageController {
     const text = msg.text;
     if (!text) return;
 
-    const session = getSession(msg.userId);
+    const session = getSession(msg.chatId);
     logger.info(
       `[消息] from=${msg.userId} chat=${msg.chatId} text="${truncate(text)}" (历史 ${session.getHistory().length} 条)`
     );
 
     if (text.startsWith('/clear')) {
       session.clear();
-      logger.info(`[命令] /clear → 已清空 ${msg.userId} 的会话上下文`);
+      logger.info(`[命令] /clear → 已清空会话 ${msg.chatId} 的上下文`);
       await sendText(msg.chatId, '已清空上下文 / Context cleared.');
       return;
     }

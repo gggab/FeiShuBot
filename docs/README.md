@@ -29,6 +29,7 @@ FeiShuBot 是一个飞书（Feishu / Lark）机器人应用。它接收用户在
 | [intent-recognition.md](intent-recognition.md) | 意图识别设计：类别定义、分类提示词、输出 schema、置信度与兜底策略 |
 | [handlers.md](handlers.md) | 四个 Handler 的设计；CLI Runner 抽象；Dify 知识问答占位设计 |
 | [feishu-integration.md](feishu-integration.md) | 飞书接入细节：长连接事件、消息卡片流式更新、配置与权限 |
+| [session-persistence.md](session-persistence.md) | 会话上下文持久化：SQLite 单文件、按 chatId 存储、保留策略 |
 | [configuration.md](configuration.md) | 环境变量、项目注册表、模型 Provider 配置 |
 | [development-plan.md](development-plan.md) | 实现里程碑、测试策略、与 AGENTS.md 工作流的对应 |
 

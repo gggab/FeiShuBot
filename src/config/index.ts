@@ -27,6 +27,15 @@ function int(key: string, fallback: number): number {
   return n;
 }
 
+function bool(key: string, fallback: boolean): boolean {
+  const v = process.env[key];
+  if (v === undefined || v === '') return fallback;
+  const normalized = v.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`环境变量 ${key} 必须是布尔值(true/false)，实际为: ${v}`);
+}
+
 function float(key: string, fallback: number): number {
   const v = process.env[key];
   if (v === undefined || v === '') return fallback;
@@ -75,6 +84,16 @@ export const config = {
     port: int('PORT', 3000),
     sessionMaxTurns: int('SESSION_MAX_TURNS', 10),
     logLevel: str('LOG_LEVEL', 'info'),
+  },
+  session: {
+    // 是否把会话上下文持久化到 SQLite（false=纯内存，进程重启即丢）。
+    persist: bool('SESSION_PERSIST', false),
+    // SQLite 文件路径（git 忽略）。
+    dbFile: str('SESSION_DB_FILE', 'session.db'),
+    // 每个会话(chatId)在库中的归档消息硬上限，超出裁掉最旧。
+    storeMaxMessages: int('SESSION_STORE_MAX_MESSAGES', 200),
+    // 超过该天数的消息按 created_at 清理；0=不按时间清理。
+    retentionDays: int('SESSION_RETENTION_DAYS', 365),
   },
 } as const;
 

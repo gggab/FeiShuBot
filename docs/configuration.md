@@ -56,8 +56,18 @@ BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发
 | 变量 | 必填 | 默认 | 说明 |
 |------|------|------|------|
 | `PORT` | | `3000` | 仅 Webhook / 卡片回调 / 健康检查需要；纯长连接可不监听 |
-| `SESSION_MAX_TURNS` | | `10` | 会话上下文保留轮数 |
+| `SESSION_MAX_TURNS` | | `10` | 会话上下文（内存）保留轮数 |
 | `LOG_LEVEL` | | `info` | 日志级别 |
+
+### 会话持久化（SQLite）
+详见 [session-persistence.md](session-persistence.md)。默认关闭即纯内存（行为同前）；开启后会话上下文按 `chatId` 落盘、跨重启恢复。
+
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `SESSION_PERSIST` | | `false` | 是否启用持久化（false=纯内存，进程重启即丢） |
+| `SESSION_DB_FILE` | | `session.db` | SQLite 文件路径（git 忽略，含 `-wal`/`-shm` 旁文件） |
+| `SESSION_STORE_MAX_MESSAGES` | | `200` | 每会话(chatId)归档消息硬上限，超出裁掉最旧 |
+| `SESSION_RETENTION_DAYS` | | `365` | 超过该天数的消息按 `created_at` 清理；`0`=不按时间清理 |
 
 ## 2. 项目注册表（Project Registry）
 

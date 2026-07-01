@@ -17,7 +17,7 @@ export class ChatHandler implements Handler {
 
   async handle(ctx: HandlerContext): Promise<void> {
     const userText = ctx.intent.task;
-    ctx.session.addUser(userText);
+    ctx.session.addUser(userText, ctx.userId);
 
     const messages: ChatMessage[] = [
       { role: 'system', content: CHAT_SYSTEM_PROMPT },

@@ -23,6 +23,8 @@ import {
   codeReadAllowlist,
   codeReadAllowedChats,
 } from './auth/authorization';
+import { setSessionStore } from './session/context';
+import { SqliteSessionStore } from './session/store';
 import { IntentRecognizer } from './intent/recognizer';
 import { HandlerRegistry } from './handlers/registry';
 import { ChatHandler } from './handlers/chat';
@@ -75,6 +77,23 @@ function main(): void {
   const dify =
     config.dify.baseUrl && config.dify.apiKey ? new DifyClient(config.dify.baseUrl, config.dify.apiKey) : null;
   logger.info(`Dify 知识库   : ${dify ? config.dify.baseUrl : '未配置（知识问答将提示缺配置）'}`);
+
+  // 会话持久化（可选）：开启则写穿透到 SQLite，跨重启恢复；否则纯内存。
+  if (config.session.persist) {
+    const store = new SqliteSessionStore(config.session.dbFile, {
+      maxMessages: config.session.storeMaxMessages,
+      retentionDays: config.session.retentionDays,
+    });
+    setSessionStore(store);
+    // 每日清理一次过期消息（unref 不阻塞退出）。
+    setInterval(() => store.sweepExpired(), 86_400_000).unref();
+    logger.info(
+      `Session 持久化: SQLite ${config.session.dbFile}` +
+        `（保留 ${config.session.retentionDays} 天，每会话上限 ${config.session.storeMaxMessages} 条）`
+    );
+  } else {
+    logger.info('Session 持久化: 关闭（纯内存，进程重启即丢）');
+  }
 
   const recognizer = new IntentRecognizer(llm, {
     model: config.llm.intentModel,

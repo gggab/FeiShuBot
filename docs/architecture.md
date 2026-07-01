@@ -90,7 +90,8 @@
 - `client.ts`：`chat()` 与 `chatStream()`。
 
 ### session/ — 会话上下文
-- 按 `userId`（或 `chatId`）维护近 N 轮对话，用于 chat 连续性与意图识别的上下文。
+- 按 `chatId` 维护近 N 轮对话，用于 chat 连续性与意图识别的上下文（群聊成员共享）。
+- 内存热缓存 `Map<chatId, SessionContext>`；可选注入 `SessionStore`（SQLite）做写穿透持久化与回灌，跨重启恢复。详见 [session-persistence.md](session-persistence.md)。
 
 ### knowledge/ — 知识问答
 - `dify.ts`：Dify API 客户端**接口占位**，本期返回「未接入」提示。
@@ -173,7 +174,8 @@ src/
     provider.ts
     client.ts
   session/
-    context.ts
+    context.ts              # 会话上下文（内存，按 chatId）
+    store.ts                # SessionStore 接口 + SqliteSessionStore（可选持久化）
   knowledge/
     dify.ts                 # 占位
   util/
