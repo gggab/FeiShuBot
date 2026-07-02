@@ -31,6 +31,7 @@
 |------|------|------|------|
 | `CLI_PROVIDER` | | `claude` | `claude`（Claude Code，默认）/ `codex`（ChatGPT CLI） |
 | `CLI_BIN` | | 同 provider 名 | 可执行文件路径（不在 PATH 时指定绝对路径） |
+| `CODEX_API_KEY` | `codex` 时 | — | Codex CLI 无头鉴权（本应用不读，由 codex 子进程继承环境变量） |
 | `CLI_TIMEOUT_MS` | | `300000` | 只读代码理解超时（5 分钟） |
 | `BUGFIX_TIMEOUT_MS` | | `1200000` | Bug 修复（写）超时（20 分钟；定位+修改更耗时） |
 

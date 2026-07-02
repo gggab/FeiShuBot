@@ -122,8 +122,8 @@ interface CliRunner {
 ```
 
 - `process.ts`：用 `child_process.spawn` 启动，逐块读取 stdout（必要时解析 stream-json），统一超时与 `AbortSignal` 取消；进程退出码非 0 时抛出（不吞错）。
-- `claude.ts`（Claude Code）：非交互执行，工作目录设为 `cwd`，read 模式倾向使用「计划/只读」相关参数；write 模式允许编辑。**具体命令行参数在实现期对照 CLI 版本确认，并回写本节。**
-- `codex.ts`（Codex / ChatGPT CLI）：非交互执行，同样区分 read/write。**参数实现期确认。**
+- `claude.ts`（Claude Code）：非交互执行（`-p <prompt> --output-format stream-json --verbose`），工作目录设为 `cwd`。read 模式 `--allowedTools Read Grep Glob`；write 模式 `--permission-mode acceptEdits --allowedTools Read Grep Glob Edit Write MultiEdit`。解析 stream-json 事件：assistant 文本块进卡片，思考/工具调用打印到控制台，`result` 文本兜底。
+- `codex.ts`（Codex / ChatGPT CLI）：非交互执行 `codex exec --json <prompt>`，工作目录同样由 spawn 的 `cwd` 决定。read 模式 `--sandbox read-only`；write 模式 `--sandbox workspace-write`。带 `--skip-git-repo-check`（注册表只保证目录存在，不保证是 git 仓库）。解析 JSONL 事件：`item.completed` 且 `item.type === "agent_message"` 的 `item.text` 进卡片；`reasoning`/`command_execution`/`file_change` 打印到控制台；收到 `turn.failed` 或流级 `error` 事件**显式抛错**（进程可能仍以 0 退出，不能只靠退出码）。无头鉴权用 `CODEX_API_KEY` 环境变量（见 docs/deployment.md §4）。
 - 选择哪个 Runner：由 `CLI_PROVIDER` 配置（默认 `claude`），意图无关；未来可按项目或任务覆盖。
 
 安全要点：

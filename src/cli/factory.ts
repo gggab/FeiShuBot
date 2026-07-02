@@ -6,13 +6,14 @@
 import { config } from '../config';
 import { CliRunner } from './runner';
 import { ClaudeCliRunner } from './claude';
+import { CodexCliRunner } from './codex';
 
 export function getCliRunner(): CliRunner {
   switch (config.cli.provider) {
     case 'claude':
       return new ClaudeCliRunner();
     case 'codex':
-      throw new Error('codex CLI 适配尚未实现（当前仅支持 claude）');
+      return new CodexCliRunner();
     default:
       throw new Error(`未知 CLI_PROVIDER: ${config.cli.provider}`);
   }
