@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { buildCodexArgs, parseCodexStream } from '../../src/cli/codex';
+import path from 'path';
+import { buildCodexArgs, codexToolPathDirs, parseCodexStream } from '../../src/cli/codex';
+
+describe('codexToolPathDirs', () => {
+  const win = (p: string) => p.split('/').join(path.sep);
+
+  it('客户端布局：bin 目录本身（rg 与 codex.exe 同目录）', () => {
+    const bin = win('C:/Users/u/AppData/Local/OpenAI/Codex/bin/codex.exe');
+    const binDir = win('C:/Users/u/AppData/Local/OpenAI/Codex/bin');
+    expect(codexToolPathDirs(bin, (p) => p === binDir)).toEqual([binDir]);
+  });
+
+  it('npm 布局：相邻的 path 目录（vendor/<triple>/path/rg）', () => {
+    const bin = win('C:/nodejs/node_modules/.../vendor/x86_64-pc-windows-msvc/codex/codex.exe');
+    const pathDir = win('C:/nodejs/node_modules/.../vendor/x86_64-pc-windows-msvc/path');
+    expect(codexToolPathDirs(bin, (p) => p === pathDir)).toEqual([pathDir]);
+  });
+
+  it('裸命令名（走 PATH 上的 shim）不做增补', () => {
+    expect(codexToolPathDirs('codex', () => true)).toEqual([]);
+  });
+
+  it('目录不存在时不增补', () => {
+    expect(codexToolPathDirs(win('C:/somewhere/codex.exe'), () => false)).toEqual([]);
+  });
+});
 
 describe('buildCodexArgs', () => {
   it('read 模式：exec --json + 只读沙箱', () => {

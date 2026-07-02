@@ -11,10 +11,25 @@
  * 无头鉴权：CODEX_API_KEY 环境变量（子进程继承，见 docs/deployment.md §4）。
  */
 
+import fs from 'fs';
+import path from 'path';
 import { CliRunner, CliTask } from './runner';
 import { spawnStream } from './process';
 import { config } from '../config';
 import { logger } from '../util/logger';
+
+/**
+ * codex 自带工具（rg 等）所在目录。经 shim（codex.cmd）启动时 shim 会把它们加进
+ * PATH；CLI_BIN 直指裸二进制时绕过了 shim，这里补回，否则 codex 找不到 rg，
+ * 只能用慢得多的方式探索代码（曾导致 5 分钟超时）。
+ * - 客户端布局：<bin>/codex.exe 与 rg.exe 同目录；
+ * - npm 布局：<vendor>/<triple>/codex/codex(.exe) 与 <vendor>/<triple>/path/rg 相邻。
+ */
+export function codexToolPathDirs(binPath: string, exists: (p: string) => boolean = fs.existsSync): string[] {
+  if (!path.isAbsolute(binPath)) return []; // 裸命令名走 PATH 上的 shim，shim 自己会处理
+  const binDir = path.dirname(binPath);
+  return [binDir, path.join(path.dirname(binDir), 'path')].filter(exists);
+}
 
 export function buildCodexArgs(task: CliTask): string[] {
   return [
@@ -154,12 +169,21 @@ export class CodexCliRunner implements CliRunner {
     logger.info(`[CLI] 调用 ${this.name} mode=${task.mode} cwd=${task.cwd}`);
     logger.info(`[CLI] 命令: ${cmd} ${formatArgsForLog(args)}`);
 
+    const toolDirs = codexToolPathDirs(cmd);
+    if (toolDirs.length > 0) logger.info(`[CLI] 附加 PATH: ${toolDirs.join(path.delimiter)}`);
+    // Windows 下环境变量键名可能是 "Path"，用实际键名覆盖，避免重复键。
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+
     const raw = spawnStream({
       cmd,
       args,
       cwd: task.cwd,
       timeoutMs: task.timeoutMs ?? config.cli.timeoutMs,
       signal: task.signal,
+      env:
+        toolDirs.length > 0
+          ? { [pathKey]: `${toolDirs.join(path.delimiter)}${path.delimiter}${process.env[pathKey] ?? ''}` }
+          : undefined,
     });
     yield* parseCodexStream(raw);
   }

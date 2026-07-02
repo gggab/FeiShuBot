@@ -15,10 +15,19 @@ export interface SpawnStreamOptions {
   cwd: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  /** 额外/覆盖环境变量（在继承的 process.env 之上合并）。 */
+  env?: Record<string, string>;
 }
 
 export async function* spawnStream(opts: SpawnStreamOptions): AsyncIterable<string> {
-  const child = spawn(opts.cmd, opts.args, { cwd: opts.cwd, windowsHide: true });
+  // stdin 必须显式关闭（ignore）：codex exec 在 stdin 为管道时会持续等待附加输入
+  // 直到 EOF，不关闭会一直挂到超时。
+  const child = spawn(opts.cmd, opts.args, {
+    cwd: opts.cwd,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
+  });
 
   const timedOut = { value: false };
 
@@ -52,7 +61,9 @@ export async function* spawnStream(opts: SpawnStreamOptions): AsyncIterable<stri
       throw new Error(`无法启动 CLI「${opts.cmd}」: ${result.error.message}`);
     }
     if (timedOut.value) {
-      throw new Error(`CLI 执行超时（${opts.timeoutMs}ms）已终止`);
+      throw new Error(
+        `CLI 执行超时（${opts.timeoutMs}ms）已终止${stderr ? '；stderr: ' + stderr.trim().slice(0, 500) : ''}`
+      );
     }
     if (result.code !== null && result.code !== 0) {
       throw new Error(`CLI 退出码 ${result.code}${stderr ? ': ' + stderr.trim().slice(0, 500) : ''}`);
