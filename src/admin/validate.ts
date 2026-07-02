@@ -18,10 +18,10 @@ export const MANAGED_FILES: readonly ManagedFile[] = [
   { name: '.env', kind: 'env', label: '环境变量（密钥、开关、超时等，见 docs/configuration.md）' },
   { name: 'projects.json', kind: 'projects', label: '项目注册表：别名 → 容器内路径（CLI 安全边界）' },
   { name: 'usermap.json', kind: 'usermap', label: '飞书 open_id → GitLab 用户映射（建 MR 指派用）' },
-  { name: 'bugfix-allowlist.json', kind: 'stringArray', label: '代码修改授权：open_id 白名单（兜底）' },
+  { name: 'bugfix-allowlist.json', kind: 'stringArray', label: '代码修改授权：人员白名单（open_id 或邮箱，兜底）' },
   { name: 'bugfix-allowed-departments.json', kind: 'stringArray', label: '代码修改授权：部门 id 白名单（主）' },
-  { name: 'code-read-allowlist.json', kind: 'stringArray', label: '代码理解授权：open_id 白名单' },
-  { name: 'code-read-allowed-chats.json', kind: 'stringArray', label: '代码理解授权：群 chat_id 白名单' },
+  { name: 'code-read-allowlist.json', kind: 'stringArray', label: '代码理解授权：人员白名单（open_id 或邮箱）' },
+  { name: 'code-read-allowed-chats.json', kind: 'stringArray', label: '代码理解授权：群白名单（chat_id）' },
 ] as const;
 
 const ENV_LINE = /^[A-Za-z_][A-Za-z0-9_]*=/;

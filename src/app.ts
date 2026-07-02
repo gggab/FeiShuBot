@@ -63,14 +63,14 @@ function main(): void {
       : null;
   logger.info(`GitLab MR     : ${gitlab ? config.gitlab.baseUrl : '未配置（Bug 修复将提示缺配置）'}`);
 
-  // 通讯录服务（A）：用于部门授权与 reviewer 自动映射；需应用具备 contact 读权限。
+  // 通讯录服务（A）：用于部门/邮箱授权与 reviewer 自动映射；需应用具备 contact 读权限。
   const contact = new ContactService(createLarkUserFetcher());
   logger.info(
-    `Code-write 授权: open_id 白名单 ${codeWriteAllowlist.length} 人 / 部门白名单 ${allowedDepartments.length} 个` +
+    `Code-write 授权: 人员白名单(open_id/邮箱) ${codeWriteAllowlist.length} 条 / 部门白名单 ${allowedDepartments.length} 个` +
       (codeWriteAllowlist.length === 0 && allowedDepartments.length === 0 ? '（空：所有人将被拒绝修改代码）' : '')
   );
   logger.info(
-    `Code-read 授权: 群白名单 ${codeReadAllowedChats.length} 个 / open_id 白名单 ${codeReadAllowlist.length} 人` +
+    `Code-read 授权: 群白名单(chat_id) ${codeReadAllowedChats.length} 个 / 人员白名单(open_id/邮箱) ${codeReadAllowlist.length} 条` +
       (codeReadAllowedChats.length === 0 && codeReadAllowlist.length === 0 ? '（空：所有人将被拒绝阅读源码）' : '')
   );
 
@@ -101,7 +101,7 @@ function main(): void {
   });
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
-    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats),
+    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats, contact),
     new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),
   ]);

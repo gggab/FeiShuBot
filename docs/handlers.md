@@ -31,7 +31,7 @@ interface Handler {
 
 目的：只读地阅读项目代码并解释实现逻辑/细节。
 
-**权限强制校验（fail-closed）**：`handle()` 第一步校验 `isAuthorizedToRead({ userId, chatId, ... })`——消息所在群 `chat_id` 命中群白名单 **或** 触发人 `open_id` 命中人员白名单才放行；两份名单皆空 → 拒绝所有人。不命中 → 卡片回「⛔ 无权限」并记审计日志，不进入阅读流程。只按「群 / 人」维度，不涉及部门（无需通讯录权限）。配置见 [configuration.md](configuration.md) §2.3。
+**权限强制校验（fail-closed）**：`handle()` 第一步校验 `isAuthorizedToRead`——消息所在群 `chat_id` 命中群白名单 **或** 触发人命中人员白名单（`open_id` 或**邮箱**）才放行；两份名单皆空 → 拒绝所有人。不命中 → 卡片回「⛔ 无权限」并记审计日志，不进入阅读流程。只按「群 / 人」维度，不涉及部门。人员白名单含邮箱时经 `ContactService` 解析比对（带缓存），解析失败=邮箱维度不命中。配置与所需飞书权限见 [configuration.md](configuration.md) §2.3。
 
 流程：
 1. 解析目标项目：`ctx.intent.project` → `ProjectRegistry.resolve()` 得到绝对路径。
@@ -70,7 +70,7 @@ interface Handler {
 ```
 
 关键设计点：
-- **权限强制校验（fail-closed）**：`handle()` 第一步校验 `canModifyCode(userId, allowlist)`，仅白名单飞书用户可触发修改代码；空名单拒绝所有人。不在名单 → 卡片回「⛔ 无权限」并记审计日志。配置见 [configuration.md](configuration.md) §2.2。
+- **权限强制校验（fail-closed）**：`handle()` 第一步校验 `isAuthorizedToModify`——部门白名单为主、人员白名单（`open_id` 或**邮箱**）兜底；名单皆空拒绝所有人。邮箱/部门维度经 `ContactService` 解析比对，失败=拒绝。不命中 → 卡片回「⛔ 无权限」并记审计日志。配置见 [configuration.md](configuration.md) §2.2。
 - **worktree 隔离**：所有改动发生在 `os.tmpdir()` 下的临时 worktree，基于 `origin/<baseBranch>`。用户本地仓库的当前分支、未提交改动、node_modules 完全不受影响（最重要的安全保证）。
 - **基线分支**：项目注册表的 `baseBranch`（如 `develop`/`release`），缺省取 `GIT_DEFAULT_BASE_BRANCH`。
 - **任务发起人 → reviewer**：需要「飞书 open_id → GitLab 用户」映射（见 [configuration.md](configuration.md) §2.1）。映射缺失：MR 照建，assignee 留空并在卡片提示「未找到你的 GitLab 账号映射，请手动指定 reviewer」（显式，不静默）。

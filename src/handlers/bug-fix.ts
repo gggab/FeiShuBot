@@ -13,7 +13,7 @@ import { GitLabClient, GitlabUserRef } from '../gitlab/client';
 import { ContactService } from '../feishu/contact';
 import { resolveProject } from './resolve-project';
 import { projects, getGitlabUser } from '../config/projects';
-import { isAuthorizedToModify } from '../auth/authorization';
+import { isAuthorizedToModify, splitUserEntries } from '../auth/authorization';
 import { config } from '../config';
 import { logger } from '../util/logger';
 import { buildFixBranch, buildCommitMessage, buildBugfixPrompt, buildMrDescription } from './bugfix-naming';
@@ -43,25 +43,30 @@ export class BugFixHandler implements Handler {
   constructor(
     private readonly runner: CliRunner,
     private readonly gitlab: GitLabClient | null,
-    private readonly openIdAllowlist: string[],
+    private readonly allowlist: string[],
     private readonly allowedDepartments: string[],
     private readonly contact: ContactService | null
   ) {}
 
-  /** 部门白名单为主、open_id 白名单兜底；部门校验失败按拒绝处理（fail-closed）。 */
+  /**
+   * 部门白名单为主、人员白名单（open_id 或邮箱）兜底。
+   * open_id 命中免查通讯录；邮箱/部门维度需通讯录，查询失败按拒绝处理（fail-closed）。
+   */
   private async isAuthorized(userId: string): Promise<boolean> {
-    if (this.openIdAllowlist.includes(userId)) return true;
-    if (this.allowedDepartments.length === 0 || !this.contact) return false;
+    const { openIds, emails } = splitUserEntries(this.allowlist);
+    if (openIds.includes(userId)) return true;
+    if ((emails.length === 0 && this.allowedDepartments.length === 0) || !this.contact) return false;
     try {
       const user = await this.contact.getUser(userId);
       return isAuthorizedToModify({
         userId,
+        email: user.email || undefined,
         departmentIds: user.departmentIds,
-        openIdAllowlist: this.openIdAllowlist,
+        allowlist: this.allowlist,
         allowedDepartments: this.allowedDepartments,
       });
     } catch (e) {
-      logger.warn(`[权限] 部门校验失败(按拒绝处理): ${(e as Error).message}`);
+      logger.warn(`[权限] 通讯录校验失败(按拒绝处理): ${(e as Error).message}`);
       return false;
     }
   }
