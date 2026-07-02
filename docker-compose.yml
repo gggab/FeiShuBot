@@ -1,0 +1,62 @@
+# See docs/deployment.md before first run:
+# - copy the *.example.json files this references and fill them in (missing
+#   files become empty directories when bind-mounted, which fails silently
+#   and confusingly)
+# - point each alias in projects.json at /repos/<alias>
+# - set up Claude Code CLI + git push credentials under ./claude-home and ~/.ssh
+
+services:
+  feishubot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: feishubot:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SESSION_DB_FILE: /app/data/session.db
+      WORKTREE_DIR: /app/worktrees
+    ports:
+      - "3000:3000"
+    volumes:
+      # SQLite persistence + bug-fix worktree scratch space.
+      - ./data:/app/data
+      - ./worktrees:/app/worktrees
+      # Machine-specific config (git-ignored in the repo, prepared per docs/configuration.md).
+      - ./projects.json:/app/projects.json:ro
+      - ./usermap.json:/app/usermap.json:ro
+      - ./bugfix-allowlist.json:/app/bugfix-allowlist.json:ro
+      - ./bugfix-allowed-departments.json:/app/bugfix-allowed-departments.json:ro
+      - ./code-read-allowlist.json:/app/code-read-allowlist.json:ro
+      - ./code-read-allowed-chats.json:/app/code-read-allowed-chats.json:ro
+      # Local clones of every repo referenced by projects.json (path must be /repos/<alias>).
+      - /srv/feishubot/repos:/repos
+      # Claude Code CLI credentials: only needed if you did NOT set CLAUDE_CODE_OAUTH_TOKEN
+      # in .env (the recommended approach, see docs/deployment.md §4). Fallback: copy the
+      # ~/.claude/.credentials.json produced by an interactive `claude login` here instead.
+      - ./claude-home:/home/appuser/.claude
+      # Git push credentials for the Bug-fix MR workflow (SSH remotes).
+      - ~/.ssh:/home/appuser/.ssh:ro
+
+  # Browser-based config editor (docs/config-ui.md). Same image, different entrypoint.
+  # No login — access control is the port binding below; NEVER expose beyond the
+  # intranet (the page shows APP_SECRET / API keys in plain text).
+  config-ui:
+    image: feishubot:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "dist/admin/server.js"]
+    restart: unless-stopped
+    environment:
+      CONFIG_DIR: /config
+      ADMIN_PORT: 8081
+    ports:
+      # Loopback only by default; change to an intranet IP (e.g. "10.0.0.5:8081:8081")
+      # plus firewall rules if others need access.
+      - "127.0.0.1:8081:8081"
+    volumes:
+      # The deploy dir itself, read-write: config-ui edits .env / *.json in place
+      # (same host files the feishubot service mounts read-only above).
+      - ./:/config

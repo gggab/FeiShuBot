@@ -1,0 +1,27 @@
+node_modules
+dist
+
+.env
+.env.local
+
+# machine-specific config (mounted as volumes at runtime, not baked into the image)
+projects.json
+usermap.json
+bugfix-allowlist.json
+bugfix-allowed-departments.json
+code-read-allowlist.json
+code-read-allowed-chats.json
+
+session.db
+session.db-wal
+session.db-shm
+*.log
+
+.git
+tests
+docs
+*.md
+
+data
+worktrees
+claude-home

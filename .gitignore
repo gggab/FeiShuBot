@@ -24,6 +24,11 @@ session.db-shm
 # logs
 *.log
 
+# docker-compose runtime volumes (see docs/deployment.md)
+/data/
+/worktrees/
+/claude-home/
+
 # OS / editor
 .DS_Store
 Thumbs.db
