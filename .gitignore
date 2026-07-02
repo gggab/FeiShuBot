@@ -28,6 +28,7 @@ session.db-shm
 /data/
 /worktrees/
 /claude-home/
+/codex-home/
 
 # OS / editor
 .DS_Store

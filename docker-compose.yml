@@ -36,6 +36,9 @@ services:
       # in .env (the recommended approach, see docs/deployment.md §4). Fallback: copy the
       # ~/.claude/.credentials.json produced by an interactive `claude login` here instead.
       - ./claude-home:/home/appuser/.claude
+      # Codex CLI credentials: persists `codex login --device-auth` (ChatGPT
+      # subscription) across container recreates. Unused when CODEX_API_KEY is set.
+      - ./codex-home:/home/appuser/.codex
       # Git push credentials for the Bug-fix MR workflow (SSH remotes).
       - ~/.ssh:/home/appuser/.ssh:ro
 
