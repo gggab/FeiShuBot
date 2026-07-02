@@ -8,7 +8,10 @@ import { CliRunner } from '../cli/runner';
 import { resolveProject } from './resolve-project';
 import { projects } from '../config/projects';
 import { isAuthorizedToRead, splitUserEntries } from '../auth/authorization';
+import { projectLabel } from './resolve-project';
 import { ContactService } from '../feishu/contact';
+import { KeyedMutex } from '../util/repo-lock';
+import { versionFooter } from '../git/inspect';
 import { config } from '../config';
 import { logger } from '../util/logger';
 
@@ -29,7 +32,8 @@ export class CodeUnderstandingHandler implements Handler {
     private readonly runner: CliRunner,
     private readonly allowlist: string[],
     private readonly allowedChats: string[],
-    private readonly contact: ContactService | null = null
+    private readonly contact: ContactService | null = null,
+    private readonly lock: KeyedMutex = new KeyedMutex()
   ) {}
 
   /**
@@ -78,18 +82,24 @@ export class CodeUnderstandingHandler implements Handler {
     ctx.reply.push(`🔍 正在阅读「${alias}」的代码…\n\n`);
 
     let acc = '';
+    let footer = '';
     try {
-      for await (const chunk of this.runner.run({
-        cwd: proj.path,
-        prompt: buildPrompt(ctx.intent.task),
-        mode: 'read',
-        timeoutMs: config.cli.timeoutMs,
-      })) {
-        acc += chunk;
-        ctx.reply.push(chunk);
-      }
+      // 与 /git 运维共享仓库级锁：阅读期间不会被切分支/拉取覆盖，版本页脚也据此一致。
+      await this.lock.run(proj.path, async () => {
+        footer = await versionFooter(projectLabel(alias, proj.path), proj.path);
+        for await (const chunk of this.runner.run({
+          cwd: proj.path,
+          prompt: buildPrompt(ctx.intent.task),
+          mode: 'read',
+          timeoutMs: config.cli.timeoutMs,
+        })) {
+          acc += chunk;
+          ctx.reply.push(chunk);
+        }
+      });
       logger.info(`[代码理解] 完成，输出 ${acc.length} 字`);
-      await ctx.reply.done(acc.trim() || '（CLI 无输出）');
+      const body = acc.trim() || '（CLI 无输出）';
+      await ctx.reply.done(`${body}\n\n---\n${footer}`);
     } catch (e) {
       logger.error('[代码理解] 失败:', e);
       await ctx.reply.fail(`代码理解执行失败（项目 ${alias}）：${(e as Error).message}`);

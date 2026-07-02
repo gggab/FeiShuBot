@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveProject } from '../../src/handlers/resolve-project';
+import { resolveProject, resolveProjects, projectLabel } from '../../src/handlers/resolve-project';
 import { ProjectRegistry } from '../../src/config/projects';
 
 const always = () => true;
@@ -47,5 +47,56 @@ describe('resolveProject', () => {
     const r = resolveProject('portal', multi, () => false);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toContain('不存在');
+  });
+});
+
+describe('projectLabel', () => {
+  it('目录名不同于别名 → 「完整名（别名）」', () => {
+    expect(projectLabel('portal', 'C:/Users/you/work/std-smart-office-portal')).toBe('std-smart-office-portal（portal）');
+  });
+
+  it('目录名与别名相同 → 只显示别名', () => {
+    expect(projectLabel('portal', '/repos/portal')).toBe('portal');
+  });
+
+  it('反斜杠路径与结尾斜杠都能取到目录名', () => {
+    expect(projectLabel('p', 'D:\\work\\my-repo\\')).toBe('my-repo（p）');
+  });
+});
+
+describe('resolveProjects (批量)', () => {
+  it('空 → 默认项目（单个）', () => {
+    const r = resolveProjects([], multi, always);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.projects.map((p) => p.alias)).toEqual(['portal']);
+  });
+
+  it('显式列举多个 → 按序解析', () => {
+    const r = resolveProjects(['login', 'portal'], multi, always);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.projects.map((p) => p.alias)).toEqual(['login', 'portal']);
+  });
+
+  it('去重', () => {
+    const r = resolveProjects(['portal', 'portal'], multi, always);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.projects.map((p) => p.alias)).toEqual(['portal']);
+  });
+
+  it('all（忽略大小写）→ 全部已注册项目', () => {
+    const r = resolveProjects(['ALL'], multi, always);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.projects.map((p) => p.alias).sort()).toEqual(['login', 'portal']);
+  });
+
+  it('任一未命中 → 显式报错（fail fast）', () => {
+    const r = resolveProjects(['portal', 'ghost'], multi, always);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain('ghost');
+  });
+
+  it('空注册表 → 拒绝', () => {
+    const r = resolveProjects(['all'], {}, always);
+    expect(r.ok).toBe(false);
   });
 });

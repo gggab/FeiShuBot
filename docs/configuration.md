@@ -138,6 +138,7 @@ BugFix 建 MR 后需把任务发起人设为 reviewer/assignee，需要「飞书
 - 部门/邮箱校验需要**通讯录读权限**（A：`feishu/contact.ts`）。后台须为应用开通 **`contact:contact.base:readonly`**（或 `contact:contact:readonly`）并设可见范围；邮箱比对还需邮箱字段权限（企业邮箱 `contact:user.enterprise_email:readonly` / 邮箱 `contact:user.email:readonly`）。未开通时该维度校验失败=拒绝，但 open_id 条目仍可直接命中放行。
 - 取部门 id：用户发条消息后，控制台 `[消息] from=ou_...`；A 接通后日志/调试可打印其 `departmentIds`，挑出研发部门 id 填入。
 - 取 open_id：同上看 `from=ou_...`（配了邮箱通常无需再取）。
+- **本授权同时管辖 `/git` 运维命令**（`/git pull`/`switch`/`status`，见 [handlers.md](handlers.md) §8）：切分支/拉取会改变共享仓库状态，属写类操作，与「修改代码」同一份白名单。
 
 ### reviewer 自动映射（C）
 建 MR 指派发起人：手填 `usermap.json` 优先；否则用通讯录邮箱 → GitLab 自动匹配。

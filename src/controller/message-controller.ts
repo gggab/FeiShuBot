@@ -12,6 +12,7 @@ import { getSession } from '../session/context';
 import { listProjectAliases } from '../config/projects';
 import { HandlerContext } from '../handlers/types';
 import { HandlerRegistry } from '../handlers/registry';
+import { GitCommandHandler } from '../handlers/git-command';
 import { IntentRecognizer, IntentServiceError } from '../intent/recognizer';
 import { logger } from '../util/logger';
 
@@ -30,7 +31,8 @@ export class MessageController {
 
   constructor(
     private readonly recognizer: IntentRecognizer,
-    private readonly registry: HandlerRegistry
+    private readonly registry: HandlerRegistry,
+    private readonly gitCommand: GitCommandHandler | null = null
   ) {}
 
   async handle(msg: IncomingMessage): Promise<void> {
@@ -67,6 +69,13 @@ export class MessageController {
     this.inFlight.add(msg.userId);
     const startedAt = Date.now();
     try {
+      // 0. Git 运维命令（/git ...）：命令前缀直达，不走意图识别。
+      if (this.gitCommand && this.gitCommand.matches(text)) {
+        logger.info(`[命令] /git → 交由 GitCommandHandler`);
+        await this.gitCommand.run(msg.userId, msg.chatId, text);
+        return;
+      }
+
       // 1. 意图识别（LLM 调用失败 → 显式提示，不静默当聊天）。
       logger.info('[意图] 识别中…');
       let outcome;

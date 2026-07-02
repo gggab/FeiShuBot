@@ -40,9 +40,14 @@ interface Handler {
    - `project` 不在允许列表 → 显式拒绝（安全边界）。
 2. 组装 CLI prompt：把 `intent.task` 包成「请阅读本仓库并解释 …，只读、不要修改文件」。
 3. `CliRunner.run({ cwd, prompt, mode: 'read' })`，stdout 增量经 `reply.push` 流式回卡片。
-4. 结束 `reply.done()`；异常 `reply.fail()`。
+4. 结束 `reply.done()`，末尾追加**版本页脚**；异常 `reply.fail()`。
 
-约束：read 模式下提示词明确「禁止修改文件」；CLI 适配层尽量用只读/计划模式参数（见 §6）。
+**读的是当前 checkout**：只在 `config.path` 那个本地仓库当前 HEAD 上只读阅读，**不 fetch、不切分支**（要更新/切版本用 §8 的 `/git` 命令）。因此回答基于什么代码，取决于该仓库此刻的分支/提交。
+
+**版本页脚（透明化）**：每次回答末尾追加一行，说明本次基于哪个版本作答，形如
+`📌 基于 **std-smart-office-portal（portal）** · 分支 \`develop\` · 提交 \`a1b2c3d\`（<最近提交标题>，2 天前）`；工作区有未提交改动追加「⚠️ 工作区有未提交改动」，游离 HEAD 则显示 tag 名或「游离 HEAD」。项目名取**本地仓库目录名**作为「工程完整名字」，别名不同则括号附上（`projectLabel`，便于回敲命令）。由 `git/inspect.ts`（`getRepoVersion`/`formatVersionFooter`，只读 rev-parse/log/status）在**仓库级锁内**采样，保证与实际被读代码一致；采样失败降级为「无法读取版本信息」，不阻断回答。
+
+约束：read 模式下提示词明确「禁止修改文件」；CLI 适配层尽量用只读/计划模式参数（见 §6）。**并发**：与 `/git` 运维共享仓库级锁（`util/repo-lock.ts`），阅读期间该仓库不会被切分支/拉取。
 
 ## 3. BugFixHandler（修改项目 bug）
 
@@ -137,3 +142,27 @@ interface CliRunner {
 
 - 任一 Handler 内部异常 → `reply.fail(可读信息)` + 记录原始错误日志（含堆栈）。
 - 绝不把失败显示成成功；绝不静默丢弃错误（AGENTS.md：No hidden errors）。
+
+## 8. Git 运维命令（`/git`，命令前缀，非意图）
+
+让触发人主动**更新代码 / 切换版本**，使后续「代码理解」基于期望的分支或标签作答。是**命令前缀**触发，`MessageController` 在意图识别前拦截（`GitCommandHandler`，不走 LLM），确定性强、无误分类。命令直接操作项目本地仓库（`config.path`），**不走 worktree**（与 BugFix 不同——这里就是要改用户共享的那个 checkout）。
+
+命令（**可一次多个项目**，或用 `all` 表示全部）：
+
+| 命令 | 作用 |
+|------|------|
+| `/git status [项目…\|all]` | 显示当前分支/提交/是否有未提交改动（只读） |
+| `/git pull [项目…\|all]` | 拉取当前分支最新代码（**仅快进** `--ff-only`） |
+| `/git switch [项目…\|all] <分支或标签>` | 切换到指定分支/标签（`checkout` 为同义词） |
+
+- **多项目**：`status`/`pull` 后的所有 token 都是项目列表；`switch` **最后一个 token 是分支/标签，其前都是项目**（例：`/git switch portal data main` 把两者都切到 `main`）。`all` 表示所有已注册项目。
+- 省略「项目」时按 Project Registry 解析默认/唯一项目（同 §2）；`/git` 或 `/git help` 回用法。
+- **批量执行与呈现**：每个项目走**各自的仓库锁**、并发执行（`Promise.all`），结果**汇总成一张卡片**逐行报告（`✅`/`⚠️`/`❌`）；单个项目失败或被拒**只影响自己那一行**，不拖垮整批。项目 token 解析阶段任一未命中/目录不存在 → 整条命令显式报错（fail fast，不半路执行）。
+- **权限**：整组 `/git` 命令复用「代码修改授权」（[configuration.md](configuration.md) §2.2，`isAuthorizedToModify`）——切分支/拉取会改变共享仓库状态、影响之后所有人的阅读结果，属写类操作。未授权 → 卡片回「⛔ 无权限」并记审计日志。
+- **安全约束（No fallback / No hidden errors）**：
+  - 工作区有未提交改动 → **显式拒绝**（`GitRefusedError`，卡片以「⚠️」提示，非 `fail`），绝不 `--force` 覆盖用户改动。
+  - `pull` 仅快进：本地与远端分叉、或处于游离 HEAD → 显式拒绝，不生成合并提交。
+  - 切换到标签 → 进入游离 HEAD（页脚显示 tag 名），符合预期；`pull` 前需先 `/git switch <分支>` 回到分支。
+  - 分支/标签不存在、网络/凭据错误等**非预期**失败 → `reply.fail` 显式报错。
+- **并发**：与代码阅读**共享仓库级锁**（`util/repo-lock.ts`，按 `config.path` 键控），同一仓库的读/切/拉串行，避免读到一半被切走。
+- 实现：`git/ops.ts`（`defaultGitOps`：`pull`/`switchRef`，注入式便于测试）+ `git/inspect.ts`（版本快照）+ `handlers/git-command.ts`（解析/授权/编排）。

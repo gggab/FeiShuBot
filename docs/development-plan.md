@@ -98,6 +98,18 @@
 - E：全局并发闸 + LLM 429 退避。
 - F：会话/conversation 持久化或 LRU 淘汰（防内存只增）。
 
+### M7 — 版本透明化 + Git 运维命令 ✅（2026-07-02 实现）
+
+需求：代码理解只读当前 checkout（不变），但①回答标注「基于什么分支/提交」；②机器人可主动拉取最新、切分支、切 tag。
+
+- **版本页脚**：`git/inspect.ts`（`getRepoVersion` 只读 rev-parse/log/status + `formatVersionFooter`/`versionFooter`）；`CodeUnderstandingHandler` 在**仓库级锁内**采样并把页脚追加到回答末尾；采样失败降级不阻断。
+- **`/git` 运维命令**（命令前缀，复用「代码修改授权」§2.2）：`handlers/git-command.ts`（`parseGitCommand` 纯函数 + `GitCommandHandler` 解析/授权/编排）、`git/ops.ts`（`defaultGitOps.pull` 仅快进 / `switchRef` 切分支或标签，脏工作区 `GitRefusedError` 显式拒绝，绝不 force）。`MessageController` 在意图识别前拦截 `/git`。
+- **多项目批量**：`resolveProjects`（列举 + `all` 关键字，去重、fail-fast）；`status`/`pull`/`switch` 均支持一次多个项目，各走独立仓库锁并发执行、汇总成一张卡片，单个失败/被拒只影响该行。
+- **并发**：`util/repo-lock.ts`（`KeyedMutex`）按 `config.path` 串行化「代码阅读 ↔ /git 运维」，避免读到一半被切分支；`app.ts` 构造单例注入两处。
+- 测试：`util/repo-lock`(4) + `handlers/git-command`(14，parse/授权/编排替身/多项目批量) + `handlers/resolve-project`(+6，`resolveProjects` 列举/all/去重/fail-fast) + `git/inspect`(7，含临时仓库集成) + `git/ops`(6，本地裸仓库集成 pull/switch/脏拒绝) = 37 新增，合计 **163 项全通过**。
+- 文档同步：handlers.md §2/§8、architecture.md（controller/git/util/目录树）、configuration.md §2.2。
+- 待人工冒烟（真实飞书）：① 代码理解回答末尾出现版本页脚；② 授权人发 `/git pull`/`/git switch portal <分支|tag>` 生效、切换后再问代码基于新版本；③ 工作区脏时被 ⚠️ 拒绝；④ 未授权人被 ⛔ 拒绝。
+
 ## 2. 测试策略
 
 > AGENTS.md：先写测试再实现；审查测试。

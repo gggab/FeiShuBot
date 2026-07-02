@@ -63,7 +63,7 @@
 
 ### controller/ — 编排层
 - `MessageController`：单一入口。流程：
-  1. 处理特殊命令（如 `/clear` 清空上下文、`/help`）。
+  1. 处理特殊命令：`/clear` 清空上下文；`/git ...` 交由 `GitCommandHandler`（命令前缀直达，不走意图识别，见 [handlers.md](handlers.md) §8）。
   2. 取该用户的 `SessionContext`。
   3. 调 `IntentRecognizer` 得到 `IntentResult`。
   4. 由 `HandlerRegistry` 找到对应 Handler，执行并把回复流式写回卡片。
@@ -81,9 +81,16 @@
 - `runner.ts`：`CliRunner` 接口（`run(task): AsyncIterable<Chunk>`）。
 - `claude.ts`（默认）/ `codex.ts`：两种 CLI 适配；`process.ts`：子进程 spawn、stdout 流、超时、取消。
 
-### git/ + gitlab/ — Bug 修复落盘
-- `git/workspace.ts`：在项目本地仓库内 fetch/checkout 测试分支、切 `fix/*` 分支、commit、push、失败回滚、仓库级并发锁。
+### git/ + gitlab/ — Bug 修复落盘 + Git 运维
+- `git/run.ts`：`git` 子进程执行助手（参数数组传递，非零退出带 stderr 抛错）。
+- `git/workspace.ts`：Bug 修复用的 **worktree 隔离**——fetch/createWorktree(基于 origin/baseBranch)/commit/push/cleanup，绝不动用户 checkout。
+- `git/inspect.ts`：只读版本快照（当前分支/提交/是否有未提交改动）+ 页脚格式化，供代码理解回答标注「基于什么版本」。
+- `git/ops.ts`：`/git` 命令的运维操作——`pull`（仅快进）/`switchRef`（切分支或标签），脏工作区显式拒绝（`GitRefusedError`）。详见 [handlers.md](handlers.md) §8。
 - `gitlab/client.ts`：调用 GitLab API 创建 Merge Request（source=fix 分支, target=测试分支），按用户映射指派发起人为 reviewer。详见 [handlers.md](handlers.md) §3。
+
+### util/ — 通用
+- `throttle.ts`：卡片流式更新节流。`logger.ts`：日志。
+- `repo-lock.ts`：按仓库路径的串行互斥锁（`KeyedMutex`），代码阅读与 `/git` 运维共享，避免读到一半被切分支/拉取。
 
 ### llm/ — 大模型客户端
 - `provider.ts`：根据配置创建 OpenAI 兼容模型（DeepSeek/Qwen/GLM）。
@@ -157,17 +164,21 @@ src/
   handlers/
     types.ts                # Handler 接口、HandlerContext
     registry.ts
-    code-understanding.ts
+    code-understanding.ts   # 只读阅读 + 版本页脚（仓库锁内采样）
     bug-fix.ts
     knowledge-qa.ts
     chat.ts
+    git-command.ts          # /git 运维命令（拉取/切分支/切 tag，命令前缀）
   cli/
     runner.ts               # CliRunner 接口
     claude.ts               # 默认
     codex.ts
     process.ts              # spawn/stream/timeout/cancel
   git/
-    workspace.ts            # fetch/checkout baseBranch/切 fix 分支/commit/push/回滚/仓库级锁
+    run.ts                  # git 子进程执行助手
+    workspace.ts            # Bug 修复 worktree：fetch/createWorktree/commit/push/cleanup
+    inspect.ts              # 只读版本快照 + 页脚格式化
+    ops.ts                  # /git 运维：pull(仅快进)/switchRef，脏工作区显式拒绝
   gitlab/
     client.ts               # 创建 Merge Request、指派 reviewer
   llm/
@@ -181,6 +192,7 @@ src/
   util/
     throttle.ts
     logger.ts
+    repo-lock.ts            # 按仓库路径串行的互斥锁（阅读与 /git 共享）
 tests/                      # 单元/集成测试（见 development-plan.md）
 docs/                       # 本目录
 ```

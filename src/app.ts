@@ -7,7 +7,7 @@
  */
 
 import { config, assertRequired } from './config';
-import { listProjectAliases } from './config/projects';
+import { listProjectAliases, projects } from './config/projects';
 import { logger } from './util/logger';
 import { larkWsClient } from './feishu/client';
 import { buildDispatcher } from './feishu/dispatcher';
@@ -31,6 +31,8 @@ import { ChatHandler } from './handlers/chat';
 import { CodeUnderstandingHandler } from './handlers/code-understanding';
 import { BugFixHandler } from './handlers/bug-fix';
 import { KnowledgeQaHandler } from './handlers/knowledge-qa';
+import { GitCommandHandler } from './handlers/git-command';
+import { KeyedMutex } from './util/repo-lock';
 
 /** 核心必填配置：缺任一项无法提供基础能力（收发消息 + 意图/聊天）。 */
 function validateCoreConfig(): void {
@@ -99,13 +101,17 @@ function main(): void {
     model: config.llm.intentModel,
     minConfidence: config.llm.intentMinConfidence,
   });
+  // 仓库级锁：代码阅读与 /git 运维共享，避免阅读期间被切分支/拉取覆盖。
+  const repoLock = new KeyedMutex();
   const registry = new HandlerRegistry([
     new ChatHandler(llm),
-    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats, contact),
+    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats, contact, repoLock),
     new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),
   ]);
-  const controller = new MessageController(recognizer, registry);
+  // /git 运维命令：复用「代码修改授权」（同 BugFix 白名单）。
+  const gitCommand = new GitCommandHandler(projects, codeWriteAllowlist, allowedDepartments, contact, repoLock);
+  const controller = new MessageController(recognizer, registry, gitCommand);
   const dispatcher = buildDispatcher((msg) => controller.handle(msg));
 
   larkWsClient.start({ eventDispatcher: dispatcher });
