@@ -24,6 +24,7 @@ vi.mock('../../src/feishu/client', () => ({
 }));
 
 import { CardReplyStream } from '../../src/feishu/reply';
+import { larkClient } from '../../src/feishu/client';
 
 describe('CardReplyStream 处理状态可视化', () => {
   beforeEach(() => {
@@ -101,6 +102,7 @@ describe('CardReplyStream 处理状态可视化', () => {
     ac.abort();
     // Handler 循环因 abort 抛错 → catch → fail(底层报错文案)
     await s.fail('CLI 退出码 143');
+    await (s as any).updateChain; // 等 abort 触发的（fire-and-forget）终态 patch 落地
     const last = patched[patched.length - 1] as any;
     expect(last.header.template).toBe('grey');
     expect(last.config.streaming_mode).toBe(false);
@@ -128,6 +130,7 @@ describe('CardReplyStream 处理状态可视化', () => {
     await s.init();
     s.push('部分');
     ac.abort(); // 模拟不响应 signal 的 Handler：仅 abort，不调用 fail/done
+    await (s as any).updateChain; // 等 abort 触发的终态 patch 落地
     const last = patched[patched.length - 1] as any;
     expect(last.header.template).toBe('grey');
     expect(last.body.elements.some((e: any) => e.tag === 'button')).toBe(false);
@@ -138,8 +141,10 @@ describe('CardReplyStream 处理状态可视化', () => {
     const s = new CardReplyStream('chat', { taskId: 't-1', signal: ac.signal });
     await s.init();
     ac.abort();
+    await (s as any).updateChain; // 等停止终态 patch 落地
     const countAfterStop = patched.length;
     await s.done('迟到的完整答案'); // 应被 finalized 守卫忽略
+    await (s as any).updateChain;
     const last = patched[patched.length - 1] as any;
     expect(patched.length).toBe(countAfterStop);
     expect(last.header.template).toBe('grey');
@@ -151,8 +156,41 @@ describe('CardReplyStream 处理状态可视化', () => {
     const s = new CardReplyStream('chat', { taskId: 't-1', signal: ac.signal });
     await s.init();
     ac.abort();
+    await (s as any).updateChain; // 等停止终态 patch 落地
     const count = patched.length;
     await vi.advanceTimersByTimeAsync(6000);
     expect(patched.length).toBe(count);
+  });
+
+  it('终态不被在途 processing 更新覆盖（乱序返回时终态仍最后生效）', async () => {
+    // 真实定时器 + 让 processing patch 比 done patch 慢，制造「网络乱序返回」。
+    vi.useRealTimers();
+    const applied: string[] = []; // 按“落地完成”顺序记录头部颜色
+    const patchMock = larkClient.im.v1.message.patch as unknown as ReturnType<typeof vi.fn>;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    patchMock
+      .mockImplementationOnce(async ({ data }: { data: { content: string } }) => {
+        const card = JSON.parse(data.content); // 第 1 次 patch = processing（慢）
+        await sleep(40);
+        applied.push(card.header.template);
+        return { code: 0, data: {} };
+      })
+      .mockImplementationOnce(async ({ data }: { data: { content: string } }) => {
+        const card = JSON.parse(data.content); // 第 2 次 patch = done（快）
+        await sleep(5);
+        applied.push(card.header.template);
+        return { code: 0, data: {} };
+      });
+
+    const s = new CardReplyStream('chat');
+    await s.init();
+    s.push('半截'); // 触发即时 processing flush
+    await sleep(10); // 让 processing patch 真正进入“在途”（越过 finalized 守卫、正 await 网络）
+    await s.done('完整答案'); // 此时终态 flush 与在途 processing 竞争
+    await sleep(80); // 等两次 patch 都落地
+
+    // 串行化后：processing 先落地、done 后落地 → 卡片最终停在绿色「已完成」，不回跳。
+    expect(applied).toEqual(['blue', 'green']);
+    expect(applied.at(-1)).toBe('green');
   });
 });

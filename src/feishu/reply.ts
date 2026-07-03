@@ -88,6 +88,8 @@ export class CardReplyStream implements ReplyStream {
   private heartbeat: NodeJS.Timeout | null = null;
   private readonly taskId?: string;
   private aborted = false;
+  /** 卡片更新串行链：保证 patch 按提交顺序落地，终态不被在途的 processing 更新覆盖。 */
+  private updateChain: Promise<void> = Promise.resolve();
   private readonly scheduleUpdate = throttle(() => {
     if (!this.closed) void this.flush('processing');
   }, CARD_UPDATE_INTERVAL_MS);
@@ -171,7 +173,19 @@ export class CardReplyStream implements ReplyStream {
     await this.flush(status);
   }
 
-  private async flush(status: CardStatus): Promise<void> {
+  /**
+   * 串行化卡片更新：按提交顺序逐个 patch。终态(done/error/stopped)总在最后提交，
+   * 因而最后生效——不会被并发在途的 processing 更新覆盖，避免「完成一闪又回到处理中、
+   * 内容还回退成半截」。链上任务自吞错误，不中断后续 patch。
+   */
+  private flush(status: CardStatus): Promise<void> {
+    this.updateChain = this.updateChain.then(() => this.doFlush(status));
+    return this.updateChain;
+  }
+
+  private async doFlush(status: CardStatus): Promise<void> {
+    // 终态已定后，丢弃仍排在链上的 processing 更新（它们只会把已完成的卡片打回处理中）。
+    if (status === 'processing' && this.finalized) return;
     try {
       const elapsedMs = status === 'processing' ? Date.now() - this.startedAt : undefined;
       await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs, this.taskId));
