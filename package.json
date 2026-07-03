@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Feishu bot that routes messages by recognized intent (code understanding / bug fix / knowledge QA / chat).",
+  "license": "MIT",
+  "author": "AlanLiao",
   "main": "dist/app.js",
   "engines": {
     "node": ">=20"
