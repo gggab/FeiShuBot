@@ -17,6 +17,7 @@ import { IntentRecognizer, IntentServiceError } from '../intent/recognizer';
 import { TaskRegistry } from './task-registry';
 import { ChatAdminService } from '../feishu/chat-admin';
 import { StopResult } from '../feishu/dispatcher';
+import { ConversationQueue } from '../util/conversation-queue';
 import { logger } from '../util/logger';
 
 const DEGRADE_NOTICE =
@@ -29,8 +30,11 @@ function truncate(text: string, max = 80): string {
 }
 
 export class MessageController {
-  /** 每用户单任务，防止对同一张卡片并发写入。 */
-  private readonly inFlight = new Set<string>();
+  /**
+   * 每会话串行队列：key=`${userId}:${chatId}`。忙时排队（不丢弃）、逐条处理；
+   * 同一人不同会话互不阻塞；排队中的消息可被撤回移除（recall）。
+   */
+  private readonly queue = new ConversationQueue();
   /** 运行中任务登记表：供卡片「停止回复」按钮按 taskId 取消。 */
   private readonly tasks = new TaskRegistry();
 
@@ -107,80 +111,114 @@ export class MessageController {
       return;
     }
 
-    if (this.inFlight.has(msg.userId)) {
-      logger.info(`[守卫] ${msg.userId} 上一条仍在处理，拒绝并发`);
-      await sendText(msg.chatId, '正在处理上一条消息，请稍候 / Previous message still in progress.');
+    // 每会话串行：忙则排队（不丢弃）、逐条处理。key 含 chatId → 同一人不同会话并行、
+    // 同一会话内严格 FIFO。排队消息可被撤回（recall）从队列移除。
+    const key = `${msg.userId}:${msg.chatId}`;
+    const { rejected, ahead } = this.queue.enqueue({
+      key,
+      messageId: msg.messageId,
+      run: () => this.process(msg),
+      // 撤回时若这条还在排队，移除后给一条可见反馈（排队提示会因此显得已作废）。
+      onCancelled: () => {
+        void sendText(
+          msg.chatId,
+          '🚫 已撤回：排队中的这条消息已取消，不会处理 / Cancelled a queued message (recalled).'
+        ).catch((e) => logger.error('[撤回] 发送取消提示失败:', e));
+      },
+    });
+    if (rejected) {
+      logger.info(`[队列] ${key} 排队已满，拒绝 message_id=${msg.messageId}`);
+      await sendText(msg.chatId, '排队消息过多，请稍后再发 / Too many queued messages, please retry later.');
+      return;
+    }
+    if (ahead > 0) {
+      logger.info(`[队列] ${key} 忙，排队 message_id=${msg.messageId}（前方 ${ahead} 条）`);
+      await sendText(msg.chatId, `已排队，前面还有 ${ahead} 条，完成后自动处理 / Queued: ${ahead} ahead.`);
+    }
+  }
+
+  /**
+   * 用户撤回消息：若该消息还在排队（未开始处理）则从队列移除，永不执行；
+   * 已在处理中的任务不受影响（可用卡片「停止回复」中止）。
+   */
+  recall(messageId: string): void {
+    const removed = this.queue.cancel(messageId);
+    logger.info(
+      `[撤回] message_id=${messageId} → ${removed ? '已从排队队列移除' : '不在排队中（已处理/正在处理/非本机器人任务）'}`
+    );
+  }
+
+  /**
+   * 单条消息的实际处理流水线（在会话串行队列中被逐条调用）：
+   * Git 运维命令 → 意图识别 → Handler 路由，流式回卡片。
+   */
+  private async process(msg: IncomingMessage): Promise<void> {
+    const text = msg.text;
+    const session = getSession(msg.chatId);
+    const startedAt = Date.now();
+
+    // 0. Git 运维命令（/git ...）：命令前缀直达，不走意图识别。
+    if (this.gitCommand && this.gitCommand.matches(text)) {
+      logger.info(`[命令] /git → 交由 GitCommandHandler`);
+      await this.gitCommand.run(msg.userId, msg.chatId, text);
       return;
     }
 
-    this.inFlight.add(msg.userId);
-    const startedAt = Date.now();
+    // 1. 意图识别（LLM 调用失败 → 显式提示，不静默当聊天）。
+    logger.info('[意图] 识别中…');
+    let outcome;
     try {
-      // 0. Git 运维命令（/git ...）：命令前缀直达，不走意图识别。
-      if (this.gitCommand && this.gitCommand.matches(text)) {
-        logger.info(`[命令] /git → 交由 GitCommandHandler`);
-        await this.gitCommand.run(msg.userId, msg.chatId, text);
+      outcome = await this.recognizer.recognize({
+        text,
+        projectAliases: listProjectAliases(),
+        history: session.getHistory(),
+      });
+    } catch (e) {
+      if (e instanceof IntentServiceError) {
+        logger.error('[意图] 服务不可用:', e);
+        await sendText(msg.chatId, '意图识别服务暂不可用，请稍后重试 / Intent service unavailable.');
         return;
       }
-
-      // 1. 意图识别（LLM 调用失败 → 显式提示，不静默当聊天）。
-      logger.info('[意图] 识别中…');
-      let outcome;
-      try {
-        outcome = await this.recognizer.recognize({
-          text,
-          projectAliases: listProjectAliases(),
-          history: session.getHistory(),
-        });
-      } catch (e) {
-        if (e instanceof IntentServiceError) {
-          logger.error('[意图] 服务不可用:', e);
-          await sendText(msg.chatId, '意图识别服务暂不可用，请稍后重试 / Intent service unavailable.');
-          return;
-        }
-        throw e;
-      }
-
-      logger.info(
-        `[意图] → ${outcome.intent.intent} conf=${outcome.intent.confidence}` +
-          `${outcome.intent.project ? ` project=${outcome.intent.project}` : ''}` +
-          `${outcome.degraded ? ` (降级:${outcome.degradeReason})` : ''} task="${truncate(outcome.intent.task)}"`
-      );
-      if (outcome.intent.reason) {
-        logger.debug(`[意图] 依据: ${outcome.intent.reason}`);
-      }
-
-      // 2. 低置信度/解析失败 → 已被降级为 chat，向用户显式说明。
-      if (outcome.degraded) {
-        logger.info('[意图] 置信度不足，已降级为 chat 并提示用户');
-        await sendText(msg.chatId, DEGRADE_NOTICE);
-      }
-
-      // 3. 路由到对应 Handler，流式回卡片。登记可取消任务，卡片带「停止回复」按钮。
-      logger.info(`[路由] → ${outcome.intent.intent} handler`);
-      const { taskId, signal } = this.tasks.create({
-        userId: msg.userId,
-        chatId: msg.chatId,
-        chatType: msg.chatType,
-      });
-      const reply = new CardReplyStream(msg.chatId, { taskId, signal });
-      await reply.init();
-      const ctx: HandlerContext = {
-        userId: msg.userId,
-        chatId: msg.chatId,
-        intent: outcome.intent,
-        session,
-        reply,
-        signal,
-      };
-      try {
-        await this.registry.get(outcome.intent.intent).handle(ctx);
-      } finally {
-        this.tasks.remove(taskId);
-      }
-      logger.info(`[完成] intent=${outcome.intent.intent} 耗时=${Date.now() - startedAt}ms`);
-    } finally {
-      this.inFlight.delete(msg.userId);
+      throw e;
     }
+
+    logger.info(
+      `[意图] → ${outcome.intent.intent} conf=${outcome.intent.confidence}` +
+        `${outcome.intent.project ? ` project=${outcome.intent.project}` : ''}` +
+        `${outcome.degraded ? ` (降级:${outcome.degradeReason})` : ''} task="${truncate(outcome.intent.task)}"`
+    );
+    if (outcome.intent.reason) {
+      logger.debug(`[意图] 依据: ${outcome.intent.reason}`);
+    }
+
+    // 2. 低置信度/解析失败 → 已被降级为 chat，向用户显式说明。
+    if (outcome.degraded) {
+      logger.info('[意图] 置信度不足，已降级为 chat 并提示用户');
+      await sendText(msg.chatId, DEGRADE_NOTICE);
+    }
+
+    // 3. 路由到对应 Handler，流式回卡片。登记可取消任务，卡片带「停止回复」按钮。
+    logger.info(`[路由] → ${outcome.intent.intent} handler`);
+    const { taskId, signal } = this.tasks.create({
+      userId: msg.userId,
+      chatId: msg.chatId,
+      chatType: msg.chatType,
+    });
+    const reply = new CardReplyStream(msg.chatId, { taskId, signal });
+    await reply.init();
+    const ctx: HandlerContext = {
+      userId: msg.userId,
+      chatId: msg.chatId,
+      intent: outcome.intent,
+      session,
+      reply,
+      signal,
+    };
+    try {
+      await this.registry.get(outcome.intent.intent).handle(ctx);
+    } finally {
+      this.tasks.remove(taskId);
+    }
+    logger.info(`[完成] intent=${outcome.intent.intent} 耗时=${Date.now() - startedAt}ms`);
   }
 }

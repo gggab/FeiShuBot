@@ -25,7 +25,7 @@
 - `/clear` 清的是**当前会话(chatId)**的上下文。
 - `SESSION_MAX_TURNS` 含义为「每个会话(chatId)在内存中保留的轮数」。
 - 历史里额外记录 `sender_id`（谁说的）作为元数据；传给 LLM 的仍是纯 `{role, content}` 序列。
-- 并发说明：`inFlight` 守卫仍是「每人单任务」（CLI 并发保护），与会话维度无关；同群多人并发触发时各自串行写库，库层一条消息一行、自增 id 保证时序。
+- 并发说明：Controller 按**会话**（`${userId}:${chatId}`）串行排队处理（见 [feishu-integration.md](feishu-integration.md) §2.2），同一会话内 FIFO、逐条写库；同群多人（不同 userId）并发触发时各自成队并行写库，库层一条消息一行、自增 id 保证时序。
 
 ## 4. 架构：内存缓存 + SQLite 事实来源
 

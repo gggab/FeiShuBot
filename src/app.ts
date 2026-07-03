@@ -117,7 +117,8 @@ function main(): void {
   const controller = new MessageController(recognizer, registry, gitCommand, chatAdmin);
   const dispatcher = buildDispatcher(
     (msg) => controller.handle(msg),
-    (taskId, operatorId) => controller.stop(taskId, operatorId)
+    (taskId, operatorId) => controller.stop(taskId, operatorId),
+    (messageId) => controller.recall(messageId)
   );
 
   larkWsClient.start({ eventDispatcher: dispatcher });

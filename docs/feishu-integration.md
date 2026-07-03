@@ -48,6 +48,20 @@ wsClient.start({ eventDispatcher: dispatcher });
 
 > 历史问题：M2 联调时出现「一条消息回复多条、最后一条不停回复」，根因即为上述阻塞式 ack + 无去重导致的飞书重推风暴。修复后单消息仅处理一次。
 
+### 2.2 并发与排队（每会话串行 + 撤回）
+
+一次只应对**同一张卡片**写一路增量，否则流式内容会互相踩踏。为此 Controller 用**每会话串行队列**（`util/conversation-queue.ts` 的 `ConversationQueue`），键为 **`${userId}:${chatId}`**：
+
+- **隔离维度是「人 × 会话」**：同一个人在**不同会话**（如某群 vs 单聊、或两个群）互不阻塞、可并行；同一会话内严格 **FIFO**，逐条处理。
+- **忙则排队，不丢弃**：某会话已有任务在跑时，后续消息**进入队列**而非被拒。入队时若前方还有 N 条，回一条轻提示「已排队，前面还有 N 条」；前方空闲则立即开始（无提示）。前一条结束后自动接着跑下一条。
+- **撤回=出队（含可见反馈）**：用户**撤回**尚在排队（未开始）的消息，订阅的 `im.message.recalled_v1` 事件触发 `MessageController.recall(messageId)` → `ConversationQueue.cancel(messageId)`，把它移出队列**永不执行**；移除时触发该排队项的 `onCancelled` 回调，回一条「🚫 已撤回：排队中的这条消息已取消」提示，让撤回**可见**（否则之前的「已排队」提示会显得仍在等待、无从判断是否生效）。已在处理中的任务**不受撤回影响**（它已出队、也没有排队项可移除），需要中止请用卡片「⏹ 停止回复」按钮（§3.2）。
+  > 注意区分：排队中的消息**还没有卡片**（卡片在任务真正开始处理时才创建）；你看到仍在转圈的卡片是**另一条正在处理的消息**，撤回别的排队消息不会让它停下。
+- **背压上限**：每会话待处理上限 `DEFAULT_MAX_PENDING`（默认 10，不含正在运行的那个），超出即拒绝并回「排队消息过多，请稍后再发」，避免无界堆积打满本地资源（No fallback / 行为显式）。
+- **与仓库级锁的关系**：会话队列解决「同一会话不并发写卡片」；跨会话/跨人对**同一仓库**的 CLI 读写另由**仓库级锁**（`util/repo-lock.ts`，按 `config.path` 键控）串行，两层互补。
+- **`/clear` 不入队**：清空当前会话上下文是即时命令，在入队前处理（与队列中的任务同其它并发写一样，属既有行为）。
+
+> 取舍：键含 `chatId` 后，一个人在多个会话可并行多个任务，本地资源上限交由仓库级锁 + 排队上限兜底；「全局并发闸」列为后续（development-plan.md 顺延 E）。
+
 ## 3. 回复：文本 vs 流式卡片
 
 - 简短/一次性回复可用文本（`im.message.create`，`msg_type: text`）。
@@ -84,6 +98,7 @@ function buildCard(content: string) {
   - `error` → 红色「❌ 处理失败」，`streaming_mode: false`。
 - `CardReplyStream` 在 `init()` 记录起始时刻并启动**心跳定时器**（默认 2s）：处理未完成时即使没有新增量，也定期 `patch` 刷新副标题的已用时长，卡片不会看起来「冻住」。`done()`/`fail()` 关闭心跳并切到终态头部。
 - 心跳间隔（2s）远宽于流式节流（200ms），对频繁更新限制友好；每次刷新副标题时长都在变化，避免「内容未变」的无效 `patch`。
+- **卡片更新串行化（避免终态回跳）**：所有 `patch` 经 `CardReplyStream.updateChain` 串成一条链**按提交顺序落地**。否则一个在途的 `processing` 更新（心跳/流式）可能比 `done` 的 `patch` **更晚返回**，把已完成的绿色卡片**打回「处理中」且内容回退成半截**。串行化保证终态（done/error/stopped）因最后提交而最后生效；`doFlush` 再加一道守卫——`finalized` 后丢弃仍排在链上的 `processing` 更新。
 
 > 状态与头部映射集中在 `feishu/card.ts` 的 `CARD_STATUS`；心跳间隔为 `feishu/reply.ts` 的 `CARD_HEARTBEAT_INTERVAL_MS`。
 
@@ -142,7 +157,7 @@ BugFixHandler 的 `propose` 模式需要「确认应用 / 取消」按钮，走 
 
 - 创建应用，获取 `App ID` / `App Secret`。
 - 开启**机器人**能力。
-- 事件订阅：添加 `im.message.receive_v1`。长连接模式下选「使用长连接接收事件」。
+- 事件订阅：添加 `im.message.receive_v1`（收消息）与 `im.message.recalled_v1`（撤回消息 → 把仍在排队的消息移出队列，见 §2.2）。长连接模式下选「使用长连接接收事件」。
 - 权限：至少「获取与发送单聊、群组消息」（`im:message`、`im:message:send_as_bot` 等，以后台实际项为准）；停止按钮的群管理员判断另需 `im:chat:readonly`（见 §6.1、[configuration.md](configuration.md) §2.4）。
 - 把机器人加入测试群或开启单聊后联调。
 

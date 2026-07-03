@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCardAction } from '../../src/feishu/dispatcher';
+import { parseCardAction, parseRecalledMessageId } from '../../src/feishu/dispatcher';
 
 describe('parseCardAction', () => {
   it('识别 stop 动作并取出 taskId 与点击者 open_id', () => {
@@ -41,5 +41,17 @@ describe('parseCardAction', () => {
     expect(parseCardAction({})).toBeNull();
     expect(parseCardAction({ action: {} })).toBeNull();
     expect(parseCardAction({ action: { value: 'stop' } })).toBeNull();
+  });
+});
+
+describe('parseRecalledMessageId', () => {
+  it('取出被撤回的 message_id', () => {
+    expect(parseRecalledMessageId({ message_id: 'om_1', chat_id: 'oc_1' })).toBe('om_1');
+  });
+
+  it('缺 message_id / 异常输入返回空串，不抛错', () => {
+    expect(parseRecalledMessageId({})).toBe('');
+    expect(parseRecalledMessageId(undefined)).toBe('');
+    expect(parseRecalledMessageId({ message_id: 123 })).toBe('');
   });
 });

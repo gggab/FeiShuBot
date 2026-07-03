@@ -110,6 +110,17 @@
 - 文档同步：handlers.md §2/§8、architecture.md（controller/git/util/目录树）、configuration.md §2.2。
 - 待人工冒烟（真实飞书）：① 代码理解回答末尾出现版本页脚；② 授权人发 `/git pull`/`/git switch portal <分支|tag>` 生效、切换后再问代码基于新版本；③ 工作区脏时被 ⚠️ 拒绝；④ 未授权人被 ⛔ 拒绝。
 
+### M8 — 每会话排队 + 撤回出队 ✅（2026-07-03 实现）
+
+需求：把旧的「同一用户忙则拒绝并丢弃」改为①按**会话**（`${userId}:${chatId}`）隔离——同一人不同会话并行、同一会话内串行；②忙时**排队逐条处理**而非丢弃；③排队中的消息被用户**撤回**则出队、永不执行。
+
+- **每会话串行队列**：`util/conversation-queue.ts`（`ConversationQueue`：FIFO、按 key 隔离、`enqueue` 返回前方数量/满则拒绝、`cancel(messageId)` 出队并触发被移除项的 `onCancelled` 回调（撤回反馈用）、抽干后清理内部状态、`DEFAULT_MAX_PENDING=10` 背压上限）。
+- **Controller 改造**：`MessageController` 去掉 `inFlight: Set`，改为 `ConversationQueue`；`handle` 拆出 `process`（Git/意图/Handler 流水线）经队列逐条调用；忙时回「已排队，前面还有 N 条」、满则回「排队消息过多」；新增 `recall(messageId)` 委托 `queue.cancel`。
+- **撤回事件 + 反馈**：`feishu/dispatcher.ts` 订阅 `im.message.recalled_v1`，`parseRecalledMessageId` 纯函数解析 → `onRecall` → `MessageController.recall`；`app.ts` 注入第三个回调。撤回排队中的消息 → 出队并回「🚫 已撤回：排队中的这条消息已取消」提示（`onCancelled`），让撤回可见。已在处理中的任务不受撤回影响（用卡片「停止回复」中止）。
+- 测试：`util/conversation-queue`(10，串行/并行/ahead/满拒/撤回出队/撤回不影响运行中/`onCancelled` 反馈回调/抛错不卡死/清理) + `feishu/dispatcher`(+2，`parseRecalledMessageId`) + `controller/message-controller-recall`(2，撤回出队/未知无副作用) = 14 新增，合计 **235 项全通过**。
+- 文档同步：feishu-integration.md §2.2 + §6、architecture.md §4.1、handlers.md §6、session-persistence.md。
+- 待人工冒烟（真实飞书）：① 同一会话连发多条 → 逐条按序作答且提示「已排队」；② 同一人在群与单聊各发一条 → 两边并行作答；③ 撤回一条仍在排队的消息 → 该条不再作答；④ 开发者后台需新增订阅 `im.message.recalled_v1`。
+
 ## 2. 测试策略
 
 > AGENTS.md：先写测试再实现；审查测试。

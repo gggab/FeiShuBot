@@ -139,7 +139,7 @@ interface CliRunner {
 安全要点：
 - **目录白名单**：`cwd` 必须来自 Project Registry 解析，拒绝任意路径，防止越权读写。
 - **提示词即输入**：用户文本只作为 CLI 的 prompt 内容，不拼进 shell（用参数数组传递，避免命令注入）。
-- **并发**：每用户单任务（`isRunning`），避免本地资源被打满。
+- **并发**：Controller 层按**会话**串行排队（`${userId}:${chatId}`，见 [feishu-integration.md](feishu-integration.md) §2.2）；同一仓库的 CLI 读/写再叠加**仓库级锁**（`util/repo-lock.ts`），避免本地资源被打满、读到一半被切分支。
 - **超时**：到时终止子进程并回报。
 
 ## 7. 错误处理统一约定

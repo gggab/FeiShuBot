@@ -21,6 +21,14 @@ export type OnMessage = (msg: IncomingMessage) => Promise<void>;
 export type StopResult = 'stopped' | 'not_found' | 'forbidden';
 /** 停止回调：由点击者对指定任务发起停止，返回鉴权后的结果。 */
 export type OnStop = (taskId: string, operatorId: string) => Promise<StopResult>;
+/** 撤回回调：用户撤回消息时触发，用于把仍在排队的该消息移出队列。 */
+export type OnRecall = (messageId: string) => void;
+
+/** 从 im.message.recalled_v1 事件里取被撤回的 message_id（纯函数，便于测试）。 */
+export function parseRecalledMessageId(data: unknown): string {
+  const id = (data as { message_id?: unknown } | undefined)?.message_id;
+  return typeof id === 'string' ? id : '';
+}
 
 /** 解析出的停止动作：任务标识 + 点击者 open_id。 */
 export interface StopAction {
@@ -67,7 +75,11 @@ const STOP_TOAST: Record<StopResult, { type: string; content: string }> = {
   forbidden: { type: 'error', content: '仅发起人或群管理员可停止 / Only the requester or a group admin can stop.' },
 };
 
-export function buildDispatcher(onMessage: OnMessage, onStop?: OnStop): Lark.EventDispatcher {
+export function buildDispatcher(
+  onMessage: OnMessage,
+  onStop?: OnStop,
+  onRecall?: OnRecall
+): Lark.EventDispatcher {
   const dedup = new Deduplicator();
 
   return new Lark.EventDispatcher({}).register({
@@ -87,6 +99,17 @@ export function buildDispatcher(onMessage: OnMessage, onStop?: OnStop): Lark.Eve
 
       // 异步处理，不阻塞事件 ack；单条失败不影响长连接监听。
       void onMessage(msg).catch((e) => logger.error('处理消息失败:', e));
+    },
+
+    // 消息撤回：若被撤回的消息仍在会话队列里排队（未开始处理），移出队列不再执行。
+    'im.message.recalled_v1': (data) => {
+      const messageId = parseRecalledMessageId(data);
+      if (!messageId) {
+        logger.warn('[事件] im.message.recalled_v1 缺 message_id，忽略');
+        return;
+      }
+      logger.info(`[事件] im.message.recalled_v1 message_id=${messageId}`);
+      onRecall?.(messageId);
     },
 
     // 卡片按钮回调：目前仅处理「停止回复」。鉴权后返回 toast 即时反馈。
