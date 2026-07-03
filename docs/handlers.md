@@ -112,6 +112,7 @@ interface Handler {
 - 取会话上下文 + 当前消息，调用 `LLM.chatStream()`，token 流经 `reply.push` 流式回卡片。
 - 与意图识别共用 Provider（DeepSeek/Qwen/GLM），模型可分别配置（识别可用更小更快的模型，聊天用更强的）。
 - 结束写回完整文本并入会话历史。
+- **系统提示词来自助手身份**：名字与描述由项目根 `IDENTITY.md` 顶部 frontmatter（`name` / `description`）装载（`src/config/identity.ts`，缺文件/字段即显式抛错），`ChatHandler` 构造时由 `buildChatSystemPrompt(identity)` 生成。改名或调整描述改 `IDENTITY.md` 即可，代码无需改。`IDENTITY.md` 是助手身份的事实来源（区别于 `docs/` 作为项目行为的事实来源）。
 
 ## 6. CLI Runner 抽象
 

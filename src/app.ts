@@ -8,6 +8,7 @@
 
 import { config, assertRequired } from './config';
 import { listProjectAliases, projects } from './config/projects';
+import { loadIdentity } from './config/identity';
 import { logger } from './util/logger';
 import { larkWsClient } from './feishu/client';
 import { buildDispatcher } from './feishu/dispatcher';
@@ -49,7 +50,11 @@ function validateCoreConfig(): void {
 function main(): void {
   validateCoreConfig();
 
+  // 助手身份（名字/描述）从 IDENTITY.md 装载；缺文件/字段即显式抛错。
+  const identity = loadIdentity();
+
   logger.info('FeiShuBot starting (M6)');
+  logger.info(`Assistant     : ${identity.name}`);
   logger.info(`Feishu domain : ${config.feishu.domain}`);
   logger.info(`LLM provider  : ${config.llm.provider} (chat: ${config.llm.model}, intent: ${config.llm.intentModel})`);
   logger.info(`CLI provider  : ${config.cli.provider}`);
@@ -105,7 +110,7 @@ function main(): void {
   // 仓库级锁：代码阅读与 /git 运维共享，避免阅读期间被切分支/拉取覆盖。
   const repoLock = new KeyedMutex();
   const registry = new HandlerRegistry([
-    new ChatHandler(llm),
+    new ChatHandler(llm, identity),
     new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats, contact, repoLock),
     new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),

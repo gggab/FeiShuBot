@@ -23,6 +23,9 @@ services:
       # SQLite persistence + bug-fix worktree scratch space.
       - ./data:/app/data
       - ./worktrees:/app/worktrees
+      # Assistant identity (name/description). Editable via config-ui; overrides the
+      # copy baked into the image. Committed default lives in the repo root.
+      - ./IDENTITY.md:/app/IDENTITY.md:ro
       # Machine-specific config (git-ignored in the repo, prepared per docs/configuration.md).
       - ./projects.json:/app/projects.json:ro
       - ./usermap.json:/app/usermap.json:ro

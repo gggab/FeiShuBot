@@ -34,6 +34,9 @@ RUN apt-get update \
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
+# Assistant identity (name/description). Baked-in default so the bot boots even
+# without a mount; deploy can override by bind-mounting IDENTITY.md (config-ui edits it).
+COPY IDENTITY.md ./
 
 RUN mkdir -p /app/data /app/worktrees && chown -R appuser:appuser /app
 

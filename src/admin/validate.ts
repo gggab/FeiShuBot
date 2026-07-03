@@ -4,7 +4,9 @@
  * 设计对齐 docs/config-ui.md §3；projects/usermap 的形状对齐 src/config/projects.ts。
  */
 
-export type FileKind = 'env' | 'projects' | 'usermap' | 'stringArray';
+import { parseIdentity } from '../config/identity';
+
+export type FileKind = 'env' | 'projects' | 'usermap' | 'stringArray' | 'identity';
 
 export interface ManagedFile {
   name: string;
@@ -13,8 +15,9 @@ export interface ManagedFile {
   label: string;
 }
 
-/** 文件名白名单：config-ui 只读写这 7 个文件，不接受任意路径。 */
+/** 文件名白名单：config-ui 只读写这 8 个文件，不接受任意路径。 */
 export const MANAGED_FILES: readonly ManagedFile[] = [
+  { name: 'IDENTITY.md', kind: 'identity', label: '助手身份：名字与描述（frontmatter name/description，注入聊天系统提示词）' },
   { name: '.env', kind: 'env', label: '环境变量（密钥、开关、超时等，见 docs/configuration.md）' },
   { name: 'projects.json', kind: 'projects', label: '项目注册表：别名 → 容器内路径（CLI 安全边界）' },
   { name: 'usermap.json', kind: 'usermap', label: '飞书 open_id → GitLab 用户映射（建 MR 指派用）' },
@@ -105,6 +108,16 @@ function validateStringArray(content: string): string | null {
   return null;
 }
 
+/** 校验 IDENTITY.md：frontmatter 含非空 name/description（与运行时装载同一套解析）。 */
+function validateIdentity(content: string): string | null {
+  try {
+    parseIdentity(content);
+    return null;
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
 /** 按文件类型校验内容；返回 null 表示通过，否则为错误信息。 */
 export function validateContent(kind: FileKind, content: string): string | null {
   switch (kind) {
@@ -116,5 +129,7 @@ export function validateContent(kind: FileKind, content: string): string | null 
       return validateUserMap(content);
     case 'stringArray':
       return validateStringArray(content);
+    case 'identity':
+      return validateIdentity(content);
   }
 }

@@ -6,21 +6,25 @@
 
 import { Handler, HandlerContext } from './types';
 import { LlmClient, ChatMessage } from '../llm/client';
+import { Identity, buildChatSystemPrompt } from '../config/identity';
 import { logger } from '../util/logger';
-
-const CHAT_SYSTEM_PROMPT = '你是飞书里的智能助手，名字叫 Sahib。当用户问起你的名字时，回答你叫 Sahib。用简洁、友好的中文回答用户的问题。';
 
 export class ChatHandler implements Handler {
   readonly intent = 'chat' as const;
 
-  constructor(private readonly llm: LlmClient) {}
+  /** 由 IDENTITY.md 装载的身份构造，助手名字/描述改文件即可，代码无需改。 */
+  private readonly systemPrompt: string;
+
+  constructor(private readonly llm: LlmClient, identity: Identity) {
+    this.systemPrompt = buildChatSystemPrompt(identity);
+  }
 
   async handle(ctx: HandlerContext): Promise<void> {
     const userText = ctx.intent.task;
     ctx.session.addUser(userText, ctx.userId);
 
     const messages: ChatMessage[] = [
-      { role: 'system', content: CHAT_SYSTEM_PROMPT },
+      { role: 'system', content: this.systemPrompt },
       ...ctx.session.getHistory(),
     ];
 

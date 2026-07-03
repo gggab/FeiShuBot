@@ -4,7 +4,7 @@
 
 ## 1. 定位与边界
 
-- **只做一件事**：读写部署目录里的 7 个配置文件（见 §3），保存前做格式校验。
+- **只做一件事**：读写部署目录里的 8 个配置文件（见 §3），保存前做格式校验。
 - **不做**：账号体系、热重载、操作 Docker。改完配置后由**人工重启 bot 容器**生效（页面上有提示）。
 - **访问控制靠网络层**：服务本身无登录。compose 默认只绑定 `127.0.0.1:8081`，需要内网访问时自行改绑定地址并用防火墙/安全组限制来源 IP。**页面会明文展示 APP_SECRET、LLM_API_KEY、GITLAB_TOKEN 等密钥，严禁暴露到公网。**
 
@@ -24,6 +24,7 @@
 
 | 文件 | 校验 |
 |------|------|
+| `IDENTITY.md` | 顶部 YAML frontmatter（`---` 包裹）须含非空 `name` 与 `description`（与运行时 `src/config/identity.ts` 同一套解析） |
 | `.env` | 每个非空、非 `#` 注释行必须形如 `KEY=...`（`KEY` 匹配 `[A-Za-z_][A-Za-z0-9_]*`） |
 | `projects.json` | JSON 对象；每个值须含非空字符串 `path`；可选 `default`(boolean) / `gitlabProjectId`(string) / `baseBranch`(string)；**最多一个 `default: true`**（多个会导致取第一个的隐式行为，直接拒绝） |
 | `usermap.json` | JSON 对象；每个值须含 `gitlabUserId`(整数) 与 `gitlabUsername`(非空字符串) |

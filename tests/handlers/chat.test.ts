@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { ChatHandler } from '../../src/handlers/chat';
 import { SessionContext } from '../../src/session/context';
 import { HandlerContext, ReplyStream } from '../../src/handlers/types';
-import { LlmClient } from '../../src/llm/client';
+import { LlmClient, ChatMessage } from '../../src/llm/client';
+import { Identity } from '../../src/config/identity';
+
+const IDENTITY: Identity = { name: 'Sahib', description: '是一个飞书智能助手。' };
 
 class FakeReply implements ReplyStream {
   pushed: string[] = [];
@@ -19,12 +22,13 @@ class FakeReply implements ReplyStream {
   }
 }
 
-function streamingLlm(chunks: string[]): LlmClient {
+function streamingLlm(chunks: string[], captured?: ChatMessage[][]): LlmClient {
   return {
     async chat() {
       return chunks.join('');
     },
-    async *chatStream() {
+    async *chatStream(messages: ChatMessage[]) {
+      captured?.push(messages);
       for (const c of chunks) yield c;
     },
   };
@@ -44,7 +48,7 @@ describe('ChatHandler', () => {
   it('流式 push 增量，并把完整回复写入会话', async () => {
     const reply = new FakeReply();
     const session = new SessionContext('u', 5);
-    const handler = new ChatHandler(streamingLlm(['你', '好', '！']));
+    const handler = new ChatHandler(streamingLlm(['你', '好', '！']), IDENTITY);
 
     await handler.handle(makeCtx(reply, session, '在吗'));
 
@@ -53,6 +57,20 @@ describe('ChatHandler', () => {
     const h = session.getHistory();
     expect(h[0]).toEqual({ role: 'user', content: '在吗' });
     expect(h[1]).toEqual({ role: 'assistant', content: '你好！' });
+  });
+
+  it('系统提示词来自 IDENTITY 身份（含名字与描述）', async () => {
+    const reply = new FakeReply();
+    const session = new SessionContext('u', 5);
+    const captured: ChatMessage[][] = [];
+    const handler = new ChatHandler(streamingLlm(['hi'], captured), IDENTITY);
+
+    await handler.handle(makeCtx(reply, session, '你叫什么'));
+
+    const system = captured[0][0];
+    expect(system.role).toBe('system');
+    expect(system.content).toContain('Sahib');
+    expect(system.content).toContain('是一个飞书智能助手。');
   });
 
   it('LLM 出错时调用 reply.fail，且不写入 assistant 历史', async () => {
@@ -67,7 +85,7 @@ describe('ChatHandler', () => {
         throw new Error('boom');
       },
     };
-    const handler = new ChatHandler(failing);
+    const handler = new ChatHandler(failing, IDENTITY);
 
     await handler.handle(makeCtx(reply, session, 'hi'));
 

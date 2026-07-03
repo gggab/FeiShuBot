@@ -6,8 +6,9 @@ import { describe, it, expect } from 'vitest';
 import { MANAGED_FILES, validateContent } from '../../src/admin/validate';
 
 describe('MANAGED_FILES', () => {
-  it('恰好管理 7 个部署配置文件', () => {
+  it('恰好管理 8 个部署配置文件', () => {
     expect(MANAGED_FILES.map((f) => f.name)).toEqual([
+      'IDENTITY.md',
       '.env',
       'projects.json',
       'usermap.json',
@@ -16,6 +17,25 @@ describe('MANAGED_FILES', () => {
       'code-read-allowlist.json',
       'code-read-allowed-chats.json',
     ]);
+  });
+});
+
+describe('validateContent: identity', () => {
+  it('接受含 name/description 的 frontmatter', () => {
+    const content = '---\nname: Sahib\ndescription: 是一个飞书智能助手。\n---\n\n# 正文\n';
+    expect(validateContent('identity', content)).toBeNull();
+  });
+
+  it('拒绝缺少 frontmatter', () => {
+    expect(validateContent('identity', '# 没有 frontmatter\n')).toMatch(/frontmatter/);
+  });
+
+  it('拒绝缺少 name', () => {
+    expect(validateContent('identity', '---\ndescription: 只有描述\n---\n')).toMatch(/name/);
+  });
+
+  it('拒绝缺少 description', () => {
+    expect(validateContent('identity', '---\nname: Sahib\n---\n')).toMatch(/description/);
   });
 });
 
