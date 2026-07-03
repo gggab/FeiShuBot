@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseIncoming } from '../../src/feishu/message';
+import { parseIncoming, stripMentions } from '../../src/feishu/message';
 
-function textEvent(text: string, chatType = 'p2p') {
+function textEvent(text: string, chatType = 'p2p', mentions?: unknown[]) {
   return {
     sender: { sender_id: { open_id: 'ou_user1' } },
     message: {
@@ -10,6 +10,7 @@ function textEvent(text: string, chatType = 'p2p') {
       message_type: 'text',
       message_id: 'om_msg1',
       content: JSON.stringify({ text }),
+      mentions,
     },
   };
 }
@@ -50,5 +51,38 @@ describe('parseIncoming', () => {
     expect(msg.userId).toBe('');
     expect(msg.chatId).toBe('');
     expect(msg.text).toBe('hi');
+  });
+
+  it('群里 @机器人 的命令：剥离提及占位符后命令前缀可用', () => {
+    const msg = parseIncoming(
+      textEvent('@_user_1 /git status portal', 'group', [{ key: '@_user_1', name: 'Sahib' }])
+    );
+    expect(msg.text).toBe('/git status portal');
+  });
+});
+
+describe('stripMentions', () => {
+  it('无 mentions 时原样返回', () => {
+    expect(stripMentions('/git status', undefined)).toBe('/git status');
+    expect(stripMentions('/git status', [])).toBe('/git status');
+  });
+
+  it('剥离首个 @机器人 占位符并折叠空白', () => {
+    expect(stripMentions('@_user_1 /clear', [{ key: '@_user_1' }])).toBe('/clear');
+  });
+
+  it('剥离多个提及占位符', () => {
+    const text = '@_user_1 帮 @_user_2 看看登录问题';
+    expect(stripMentions(text, [{ key: '@_user_1' }, { key: '@_user_2' }])).toBe('帮 看看登录问题');
+  });
+
+  it('前瞻避免 @_user_1 误伤 @_user_10', () => {
+    const text = '@_user_1 和 @_user_10 都在';
+    // 仅剥离 @_user_1（含末尾空格），@_user_10 保留
+    expect(stripMentions(text, [{ key: '@_user_1' }])).toBe('和 @_user_10 都在');
+  });
+
+  it('key 缺失的 mention 项被跳过', () => {
+    expect(stripMentions('@_user_1 hi', [{ name: '无 key' }, { key: '@_user_1' }])).toBe('hi');
   });
 });

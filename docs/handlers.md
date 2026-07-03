@@ -9,6 +9,7 @@ interface HandlerContext {
   intent: IntentResult;        // 来自意图识别
   session: SessionContext;     // 该用户的会话上下文
   reply: ReplyStream;          // 流式回复句柄（封装节流 updateMessage）
+  signal?: AbortSignal;        // 取消信号：用户点「停止回复」按钮时触发（见 feishu-integration §3.2）
 }
 
 interface ReplyStream {
@@ -98,7 +99,10 @@ interface Handler {
 - 解析响应 `answer`；`metadata.retriever_resources[].document_name` 作为「参考来源」附在卡片末尾（去重）。
 - **多轮**：按用户保存 Dify 返回的 `conversation_id`，下次带上以保持上下文。
 - 未配置（缺 `DIFY_BASE_URL`/`DIFY_API_KEY`）→ 显式提示「知识库未配置」，不静默退化。
-- 失败（HTTP 非 2xx / 网络）→ `reply.fail` 显式报错。
+- 失败 → `reply.fail` 显式报错，且**错误可读**（No hidden errors）：
+  - 连接类错误（`fetch failed`，真实原因在 `err.cause`）经 `describeFetchError` 翻译成可读原因并**带上目标 URL**，如「连接 Dify 失败（http://…/chat-messages）：连接超时（UND_ERR_CONNECT_TIMEOUT），请检查 DIFY_BASE_URL 与网络可达性」；覆盖 `ECONNREFUSED`/`ENOTFOUND`/`ETIMEDOUT` 等常见 code。
+  - HTTP 非 2xx 的报错也附上端点 URL。
+  - 若失败源于**用户主动停止**（`signal.aborted`）→ 原样抛出，交由卡片按「已停止」收尾，不误报成连接错误。
 
 后续可选增强（暂不实现）：
 - 命中不足时**叠加一次源码阅读**：转交 CodeUnderstandingHandler 的只读 CLI 补充实现细节再合并作答（§intent「问及实现细节时同步查看源码」的落点）。

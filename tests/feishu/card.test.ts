@@ -31,6 +31,36 @@ describe('buildMarkdownCard', () => {
     expect(card.header.template).toBe('red');
     expect(card.header.title.content).toContain('失败');
   });
+
+  it('stopped：灰色头部、关闭流式', () => {
+    const card = buildMarkdownCard('half', 'stopped');
+    expect(card.config.streaming_mode).toBe(false);
+    expect(card.header.template).toBe('grey');
+    expect(card.header.title.content).toContain('已停止');
+  });
+
+  it('processing 且带 taskId 时追加停止按钮，value 携带 taskId', () => {
+    const card = buildMarkdownCard('working', 'processing', 0, 'task-1');
+    const btn = card.body.elements.find((e: any) => e.tag === 'button') as any;
+    expect(btn).toBeDefined();
+    expect(btn.type).toBe('danger');
+    expect(btn.behaviors[0]).toMatchObject({
+      type: 'callback',
+      value: { action: 'stop', taskId: 'task-1' },
+    });
+  });
+
+  it('processing 无 taskId 时不渲染按钮', () => {
+    const card = buildMarkdownCard('working', 'processing', 0);
+    expect(card.body.elements.some((e: any) => e.tag === 'button')).toBe(false);
+  });
+
+  it('终态（done/stopped）即使传 taskId 也不渲染按钮', () => {
+    for (const status of ['done', 'stopped', 'error'] as const) {
+      const card = buildMarkdownCard('x', status, undefined, 'task-1');
+      expect(card.body.elements.some((e: any) => e.tag === 'button')).toBe(false);
+    }
+  });
 });
 
 describe('formatElapsed', () => {

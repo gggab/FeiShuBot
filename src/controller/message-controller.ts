@@ -14,6 +14,9 @@ import { HandlerContext } from '../handlers/types';
 import { HandlerRegistry } from '../handlers/registry';
 import { GitCommandHandler } from '../handlers/git-command';
 import { IntentRecognizer, IntentServiceError } from '../intent/recognizer';
+import { TaskRegistry } from './task-registry';
+import { ChatAdminService } from '../feishu/chat-admin';
+import { StopResult } from '../feishu/dispatcher';
 import { logger } from '../util/logger';
 
 const DEGRADE_NOTICE =
@@ -28,12 +31,56 @@ function truncate(text: string, max = 80): string {
 export class MessageController {
   /** 每用户单任务，防止对同一张卡片并发写入。 */
   private readonly inFlight = new Set<string>();
+  /** 运行中任务登记表：供卡片「停止回复」按钮按 taskId 取消。 */
+  private readonly tasks = new TaskRegistry();
 
   constructor(
     private readonly recognizer: IntentRecognizer,
     private readonly registry: HandlerRegistry,
-    private readonly gitCommand: GitCommandHandler | null = null
+    private readonly gitCommand: GitCommandHandler | null = null,
+    private readonly chatAdmin: ChatAdminService | null = null
   ) {}
+
+  /**
+   * 停止指定任务（卡片「停止回复」按钮回调触发），带权限判断：
+   * 发起人本人任意会话可停；群聊里群主/群管理员亦可停；其余拒绝。
+   * 群管理员判断需查群信息，查询失败按拒绝处理（fail-closed），但不影响发起人本人。
+   */
+  async stop(taskId: string, operatorId: string): Promise<StopResult> {
+    const meta = this.tasks.get(taskId);
+    if (!meta) {
+      logger.info(`[停止] taskId=${taskId} → 任务不存在（可能已结束）`);
+      return 'not_found';
+    }
+
+    const allowed = await this.canStop(meta.userId, meta.chatId, meta.chatType, operatorId);
+    if (!allowed) {
+      logger.info(`[停止] 拒绝 taskId=${taskId} operator=${operatorId}（非发起人/群管理员）`);
+      return 'forbidden';
+    }
+
+    // 通过鉴权后任务可能刚好结束并被注销；abort 返回 false 即视为已结束。
+    const ok = this.tasks.abort(taskId);
+    logger.info(`[停止] taskId=${taskId} operator=${operatorId} → ${ok ? '已请求中止' : '任务已结束'}`);
+    return ok ? 'stopped' : 'not_found';
+  }
+
+  /** 发起人本人始终可停；群聊再放行群主/群管理员；单聊仅发起人（即本人）。 */
+  private async canStop(
+    ownerUserId: string,
+    chatId: string,
+    chatType: string,
+    operatorId: string
+  ): Promise<boolean> {
+    if (operatorId === ownerUserId) return true;
+    if (chatType !== 'group' || !this.chatAdmin) return false;
+    try {
+      return await this.chatAdmin.isOwnerOrManager(chatId, operatorId);
+    } catch (e) {
+      logger.warn(`[停止] 群管理员校验失败(按拒绝处理) chat=${chatId}: ${(e as Error).message}`);
+      return false;
+    }
+  }
 
   async handle(msg: IncomingMessage): Promise<void> {
     if (!msg.chatId) {
@@ -109,9 +156,14 @@ export class MessageController {
         await sendText(msg.chatId, DEGRADE_NOTICE);
       }
 
-      // 3. 路由到对应 Handler，流式回卡片。
+      // 3. 路由到对应 Handler，流式回卡片。登记可取消任务，卡片带「停止回复」按钮。
       logger.info(`[路由] → ${outcome.intent.intent} handler`);
-      const reply = new CardReplyStream(msg.chatId);
+      const { taskId, signal } = this.tasks.create({
+        userId: msg.userId,
+        chatId: msg.chatId,
+        chatType: msg.chatType,
+      });
+      const reply = new CardReplyStream(msg.chatId, { taskId, signal });
       await reply.init();
       const ctx: HandlerContext = {
         userId: msg.userId,
@@ -119,8 +171,13 @@ export class MessageController {
         intent: outcome.intent,
         session,
         reply,
+        signal,
       };
-      await this.registry.get(outcome.intent.intent).handle(ctx);
+      try {
+        await this.registry.get(outcome.intent.intent).handle(ctx);
+      } finally {
+        this.tasks.remove(taskId);
+      }
       logger.info(`[完成] intent=${outcome.intent.intent} 耗时=${Date.now() - startedAt}ms`);
     } finally {
       this.inFlight.delete(msg.userId);

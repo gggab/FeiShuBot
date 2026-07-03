@@ -18,6 +18,8 @@ export interface ChatOptions {
   /** 覆盖默认模型（如意图识别用更快的模型） / Override model. */
   model?: string;
   temperature?: number;
+  /** 取消信号：中止进行中的（流式）请求 / Abort the (streaming) request. */
+  signal?: AbortSignal;
 }
 
 export interface LlmClient {
@@ -50,12 +52,15 @@ export class OpenAiClient implements LlmClient {
   async *chatStream(messages: ChatMessage[], opts?: ChatOptions): AsyncIterable<string> {
     const model = opts?.model ?? this.defaultModel;
     logger.debug(`[llm] chatStream model=${model} messages=${messages.length} temp=${opts?.temperature ?? 'default'}`);
-    const stream = await this.client.chat.completions.create({
-      model,
-      messages,
-      temperature: opts?.temperature,
-      stream: true,
-    });
+    const stream = await this.client.chat.completions.create(
+      {
+        model,
+        messages,
+        temperature: opts?.temperature,
+        stream: true,
+      },
+      { signal: opts?.signal }
+    );
     let chunks = 0;
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content;

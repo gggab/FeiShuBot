@@ -12,6 +12,7 @@ import { logger } from './util/logger';
 import { larkWsClient } from './feishu/client';
 import { buildDispatcher } from './feishu/dispatcher';
 import { ContactService, createLarkUserFetcher } from './feishu/contact';
+import { ChatAdminService, createLarkChatAdminFetcher } from './feishu/chat-admin';
 import { MessageController } from './controller/message-controller';
 import { createLlmClient } from './llm/provider';
 import { getCliRunner } from './cli/factory';
@@ -111,8 +112,13 @@ function main(): void {
   ]);
   // /git 运维命令：复用「代码修改授权」（同 BugFix 白名单）。
   const gitCommand = new GitCommandHandler(projects, codeWriteAllowlist, allowedDepartments, contact, repoLock);
-  const controller = new MessageController(recognizer, registry, gitCommand);
-  const dispatcher = buildDispatcher((msg) => controller.handle(msg));
+  // 群管理员服务：用于卡片「停止回复」按钮的权限判断（发起人 / 群主 / 群管理员）。
+  const chatAdmin = new ChatAdminService(createLarkChatAdminFetcher());
+  const controller = new MessageController(recognizer, registry, gitCommand, chatAdmin);
+  const dispatcher = buildDispatcher(
+    (msg) => controller.handle(msg),
+    (taskId, operatorId) => controller.stop(taskId, operatorId)
+  );
 
   larkWsClient.start({ eventDispatcher: dispatcher });
   logger.info('已启动飞书长连接，等待消息…（Ctrl+C 退出）');

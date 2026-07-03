@@ -66,27 +66,56 @@ export async function updateCard(messageId: string, card: object): Promise<void>
   logger.debug(`[飞书] updateCard message_id=${messageId}`);
 }
 
+/** CardReplyStream 可选参数：绑定停止按钮的 taskId 与取消信号。 */
+export interface CardReplyOptions {
+  /** 处理中渲染「停止回复」按钮，携带该 taskId。 */
+  taskId?: string;
+  /** 用户点「停止」时触发；一旦 abort，终态渲染为「已停止」而非「失败」。 */
+  signal?: AbortSignal;
+}
+
 /**
  * 基于可更新卡片的流式回复。先发占位卡片拿到 messageId，
  * 随后 push 的增量经节流写回同一张卡片；done/fail 做最终更新并关闭流式。
+ * 处理中渲染「停止回复」按钮；用户停止后终态为「已停止」并保留已生成内容。
  */
 export class CardReplyStream implements ReplyStream {
   private buffer = '';
   private messageId = '';
   private closed = false;
+  private finalized = false;
   private startedAt = 0;
   private heartbeat: NodeJS.Timeout | null = null;
+  private readonly taskId?: string;
+  private aborted = false;
   private readonly scheduleUpdate = throttle(() => {
     if (!this.closed) void this.flush('processing');
   }, CARD_UPDATE_INTERVAL_MS);
 
-  constructor(private readonly chatId: string) {}
+  constructor(
+    private readonly chatId: string,
+    opts: CardReplyOptions = {}
+  ) {
+    this.taskId = opts.taskId;
+    const signal = opts.signal;
+    if (signal) {
+      if (signal.aborted) this.aborted = true;
+      // 用户点「停止」→ 立即把卡片切到「已停止」，不等 Handler 循环抛错（有的 Handler
+      // 的耗时调用并不响应 signal，若不主动刷新，卡片会一直停在「处理中」）。
+      else signal.addEventListener('abort', () => this.onAbort(), { once: true });
+    }
+  }
 
   /** 发送占位卡片并记录 messageId，启动处理中心跳。必须在 push 之前调用。 */
   async init(placeholder = '思考中… / Thinking…'): Promise<void> {
     this.startedAt = Date.now();
-    const { messageId } = await sendCard(this.chatId, buildMarkdownCard(placeholder, 'processing', 0));
+    const { messageId } = await sendCard(this.chatId, buildMarkdownCard(placeholder, 'processing', 0, this.taskId));
     this.messageId = messageId;
+    // init 期间就被停止：立即渲染「已停止」终态。
+    if (this.aborted && !this.finalized) {
+      await this.finalize('stopped');
+      return;
+    }
     // 心跳：处理未完成时定期刷新头部「已用时长」，即使没有新增量也让用户看到仍在处理。
     this.heartbeat = setInterval(() => {
       if (!this.closed) void this.flush('processing');
@@ -101,30 +130,51 @@ export class CardReplyStream implements ReplyStream {
   }
 
   async done(finalText?: string): Promise<void> {
-    this.stop();
+    if (this.finalized) return;
     if (finalText !== undefined) this.buffer = finalText;
-    await this.flush('done');
+    await this.finalize('done');
   }
 
+  /**
+   * 失败终态。若失败源自用户主动停止（signal 已 abort），渲染为「已停止」并保留
+   * 已生成的部分内容，不展示底层报错文案；否则渲染红色「处理失败」并展示 message。
+   */
   async fail(message: string): Promise<void> {
-    this.stop();
-    this.buffer = message;
-    await this.flush('error');
+    if (this.finalized) return;
+    if (this.aborted) {
+      await this.finalize('stopped');
+    } else {
+      this.buffer = message;
+      await this.finalize('error');
+    }
   }
 
-  /** 标记关闭并停止心跳；终态刷新前调用，避免心跳把状态改回「处理中」。 */
-  private stop(): void {
+  /** 收到取消信号：抢先把卡片切到「已停止」终态（幂等，后续 done/fail 将被忽略）。 */
+  private onAbort(): void {
+    this.aborted = true;
+    if (this.finalized || !this.messageId) return; // init 前的 abort 由 init 收尾
+    void this.finalize('stopped');
+  }
+
+  /** 收敛为终态：关闭流、停心跳、（停止态）补充说明，刷新一次卡片。只生效一次。 */
+  private async finalize(status: CardStatus): Promise<void> {
+    if (this.finalized) return;
+    this.finalized = true;
     this.closed = true;
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
       this.heartbeat = null;
     }
+    if (status === 'stopped') {
+      this.buffer = `${this.buffer.trim()}\n\n⏹ 已由用户停止`.trim();
+    }
+    await this.flush(status);
   }
 
   private async flush(status: CardStatus): Promise<void> {
     try {
       const elapsedMs = status === 'processing' ? Date.now() - this.startedAt : undefined;
-      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs));
+      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs, this.taskId));
     } catch (e) {
       // 卡片更新失败不应让整个处理流程崩溃；显式记录。
       logger.error('更新卡片失败:', e);

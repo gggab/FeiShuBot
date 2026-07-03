@@ -27,7 +27,7 @@ export class ChatHandler implements Handler {
     logger.info(`[chat] 调用 LLM 流式回复…（上下文 ${ctx.session.getHistory().length} 条）`);
     let acc = '';
     try {
-      for await (const delta of this.llm.chatStream(messages)) {
+      for await (const delta of this.llm.chatStream(messages, { signal: ctx.signal })) {
         acc += delta;
         ctx.reply.push(delta);
       }

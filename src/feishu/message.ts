@@ -23,6 +23,13 @@ export interface IncomingMessage {
   supported: boolean;
 }
 
+/** 一条 @ 提及：key 即正文里的占位符（如 `@_user_1`）。 */
+export interface Mention {
+  key?: string;
+  name?: string;
+  id?: { open_id?: string };
+}
+
 /** 事件的结构化最小子集，便于在不依赖 SDK 类型的情况下测试。 */
 interface MessageReceiveLike {
   sender?: { sender_id?: { open_id?: string } };
@@ -32,6 +39,7 @@ interface MessageReceiveLike {
     message_type?: string;
     content?: string;
     message_id?: string;
+    mentions?: Mention[];
   };
 }
 
@@ -49,9 +57,30 @@ export function parseIncoming(event: MessageReceiveLike): IncomingMessage {
     chatType: message.chat_type ?? '',
     messageType,
     messageId: message.message_id ?? '',
-    text: supported ? extractText(message.content) : '',
+    text: supported ? stripMentions(extractText(message.content), message.mentions) : '',
     supported,
   };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 去掉正文里的 @ 提及占位符（`@_user_1` / `@_all` 等）。
+ * 群里 @机器人 触发时，飞书会把 `@_user_1` 拼在文本最前，若不剥离会导致
+ * `/git`、`/clear` 等命令前缀失配、并干扰意图识别。用 mentions[].key 精确匹配，
+ * 避免误伤形如 `@_user_1` 的普通文本；末尾折叠多余空白。
+ */
+export function stripMentions(text: string, mentions?: Mention[]): string {
+  if (!text || !mentions || mentions.length === 0) return text;
+  let out = text;
+  for (const m of mentions) {
+    if (!m.key) continue;
+    // 前瞻 (?![0-9]) 防止 `@_user_1` 命中 `@_user_10`。
+    out = out.replace(new RegExp(escapeRegExp(m.key) + '(?![0-9])', 'g'), '');
+  }
+  return out.replace(/\s+/g, ' ').trim();
 }
 
 function extractText(content: string | undefined): string {

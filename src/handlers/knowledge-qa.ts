@@ -28,7 +28,7 @@ export class KnowledgeQaHandler implements Handler {
 
     try {
       const prev = this.conversations.get(ctx.userId);
-      const ans = await this.dify.chat(ctx.intent.task, ctx.userId, prev);
+      const ans = await this.dify.chat(ctx.intent.task, ctx.userId, prev, ctx.signal);
       if (ans.conversationId) this.conversations.set(ctx.userId, ans.conversationId);
 
       let text = ans.answer.trim() || '（知识库未返回内容）';

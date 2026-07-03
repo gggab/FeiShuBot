@@ -146,6 +146,7 @@ export class BugFixHandler implements Handler {
         prompt: buildBugfixPrompt(ctx.intent.task),
         mode: 'write',
         timeoutMs: config.cli.bugfixTimeoutMs,
+        signal: ctx.signal,
       })) {
         summary += chunk;
         ctx.reply.push(chunk);

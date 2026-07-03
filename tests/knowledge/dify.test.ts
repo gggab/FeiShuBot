@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { buildChatMessagesUrl, parseDifyAnswer, DifyClient } from '../../src/knowledge/dify';
+import { buildChatMessagesUrl, parseDifyAnswer, DifyClient, describeFetchError } from '../../src/knowledge/dify';
+
+/** 构造一个像 undici fetch 失败那样、真实原因在 cause 的错误。 */
+function fetchFailed(code: string): Error {
+  const e = new TypeError('fetch failed');
+  (e as unknown as { cause: unknown }).cause = { code };
+  return e;
+}
 
 describe('buildChatMessagesUrl', () => {
   it('拼出 chat-messages 端点并去尾斜杠', () => {
@@ -55,12 +62,54 @@ describe('DifyClient.chat', () => {
     expect(ans.conversationId).toBe('c');
   });
 
-  it('HTTP 非 2xx → 抛错', async () => {
+  it('HTTP 非 2xx → 抛错（含端点 URL）', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: false, status: 401, text: async () => 'unauthorized' }))
     );
     const client = new DifyClient('http://x/v1', 'app-key');
-    await expect(client.chat('q', 'ou_1')).rejects.toThrow('HTTP 401');
+    await expect(client.chat('q', 'ou_1')).rejects.toThrow('HTTP 401（http://x/v1/chat-messages）');
+  });
+
+  it('连接失败 → 包装成含 URL 与可读原因的错误', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw fetchFailed('UND_ERR_CONNECT_TIMEOUT');
+      })
+    );
+    const client = new DifyClient('http://172.20.14.199', 'app-key');
+    await expect(client.chat('q', 'ou_1')).rejects.toThrow(
+      '连接 Dify 失败（http://172.20.14.199/chat-messages）：连接超时（UND_ERR_CONNECT_TIMEOUT）'
+    );
+  });
+
+  it('用户主动停止（signal aborted）→ 原样抛出，不包装为连接错误', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      })
+    );
+    const client = new DifyClient('http://x/v1', 'app-key');
+    await expect(client.chat('q', 'ou_1', undefined, ac.signal)).rejects.toThrow('aborted');
+  });
+});
+
+describe('describeFetchError', () => {
+  it('已知 code → 可读中文原因 + code', () => {
+    expect(describeFetchError(fetchFailed('ECONNREFUSED'))).toContain('连接被拒绝');
+    expect(describeFetchError(fetchFailed('ECONNREFUSED'))).toContain('ECONNREFUSED');
+    expect(describeFetchError(fetchFailed('ENOTFOUND'))).toContain('域名解析失败');
+  });
+
+  it('未知 code → 网络错误 + code', () => {
+    expect(describeFetchError(fetchFailed('EWTF'))).toContain('网络错误（EWTF）');
+  });
+
+  it('无 cause.code → 退回 message', () => {
+    expect(describeFetchError(new Error('boom'))).toBe('boom');
   });
 });

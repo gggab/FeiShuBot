@@ -36,6 +36,7 @@ wsClient.start({ eventDispatcher: dispatcher });
 要点：
 - 非文本消息（图片、文件等）→ 显式回复「请发送文本消息」。
 - 群聊（`group`）通常需 @机器人 才触发；单聊（`p2p`）直接触发。是否限定 @ 由实现期与权限配置决定。
+- **剥离 @ 提及占位符**：群里 @机器人 时，飞书会把 `@_user_1` 拼在正文最前（正文含占位符、真实姓名在 `message.mentions[].name`）。若不剥离，`text` 形如 `@_user_1 /git status portal`，会导致 `/git`、`/clear` 等**命令前缀失配**并**干扰意图识别**（实测被误判为 `knowledge_qa`）。`message.ts` 的 `stripMentions` 用 `mentions[].key` 精确剥离占位符（前瞻 `(?![0-9])` 防止 `@_user_1` 误伤 `@_user_10`）、折叠空白，再交给 Controller。注意：其它被 @ 的用户占位符也一并去除（姓名不进入归一化文本）。
 
 ### 2.1 事件投递：至少一次 + 去重 + 快速 ack（重要）
 
@@ -86,6 +87,34 @@ function buildCard(content: string) {
 
 > 状态与头部映射集中在 `feishu/card.ts` 的 `CARD_STATUS`；心跳间隔为 `feishu/reply.ts` 的 `CARD_HEARTBEAT_INTERVAL_MS`。
 
+### 3.2 停止按钮与任务取消
+
+长任务（CLI 阅读/修复、LLM 长回答）用户可能中途想停下。因此**处理中**的卡片底部带一个「⏹ 停止回复」按钮，点击即中止当前后端处理：
+
+- **任务登记**：`MessageController` 处理每条消息时向 `TaskRegistry`（`controller/task-registry.ts`）登记一个 `taskId`，拿到对应的 `AbortController`；`signal` 注入 `HandlerContext.signal`，Handler 透传给 `CliRunner.run({ signal })` 与 `LlmClient.chatStream(msgs, { signal })`。处理结束（成功/失败/停止）在 `finally` 中注销该 `taskId`。
+- **按钮**：`processing` 状态且带 `taskId` 时，卡片追加一个 `danger` 回传按钮，`value = { action: 'stop', taskId }`。终态（done/error/stopped）不再渲染按钮。
+- **回调**：点击触发 `card.action.trigger`（需在开发者后台订阅「卡片回传交互」）。`dispatcher` 用纯函数 `parseCardAction` 解析出 `{ action: 'stop', taskId, operatorId }`（`operatorId` 取事件里的点击者 open_id，兼容 `operator.open_id` 与 `operator.operator_id.open_id`），再调 `onStop(taskId, operatorId)`（→ `MessageController.stop`），按结果回 toast。
+- **中止效果**：`AbortController.abort()` 会 kill 掉 CLI 子进程 / 中断 LLM 流 / 取消 Dify fetch（各 Handler 均把 `ctx.signal` 透传给底层调用）。正在 `for await` 的 Handler 循环因此抛错落到 `catch → reply.fail()`，终态渲染为灰色「⏹ 已停止」并**保留已生成的部分内容**（不当作红色「处理失败」，也不显示底层报错文案）。
+- **立即反馈（关键）**：`CardReplyStream` 直接监听 `signal`，收到 abort 就**抢先**把卡片收敛到「已停止」终态（停心跳、去按钮、刷新一次），**不依赖 Handler 循环抛错**。否则像知识问答这类「一次 `await` 且底层未响应 signal」的处理，点了停止卡片会一直停在「处理中」。收敛用 `finalize()` 幂等：谁先到（abort 抢先 / Handler 的 done/fail）谁定终态，晚到的 done/fail 被忽略，避免迟到的完整结果覆盖「已停止」。
+- **范围**：停止按钮作用于 Controller 路由的四类意图（chat / 代码理解 / Bug 修复 / 知识问答）。`/git` 运维命令执行快、并发多项目，暂不挂停止按钮。
+
+#### 停止权限（谁能停）
+
+停止按钮对群内所有成员**可见**（同一张卡片对所有成员渲染一致，飞书无法按观看者隐藏单个按钮），因此权限在**点击回调时强制校验**，无权者点了只收到 toast 被拒、任务不受影响。规则：
+
+```
+可停止  ⟺  点击者 == 发起人
+         ∨  (群聊 ∧ 点击者 ∈ {群主} ∪ {群管理员})
+```
+
+- 建任务时把 `{ userId(发起人), chatId, chatType }` 存进 `TaskRegistry`（`create(meta)` / `get(taskId)`）。
+- 单聊（p2p）：会话里只有发起人与机器人，点击者必是发起人 → 直接放行，**不查 API**。
+- 群聊：先比对发起人（内存，零 API）；非发起人再经 `ChatAdminService.isOwnerOrManager(chatId, operatorId)` 判断是否群主/管理员。群主 + 管理员一次 `im.v1.chat.get` 即取回（`owner_id` + `user_manager_id_list`），按 `chatId` 带 TTL 缓存（默认 5 分钟）。
+- **fail-closed**：群管理员查询失败按拒绝处理（返回 `forbidden`）；发起人本人不依赖该 API，不受影响。
+- `MessageController.stop` 返回 `stopped | not_found | forbidden`，`dispatcher` 分别回：已停止 / 任务已结束 / 仅发起人或群管理员可停止。
+
+> `taskId` 用 `randomUUID()` 生成，仅进程内有效；进程重启后旧卡片上的按钮点击会得到「任务已结束」toast（`abort` 返回 false），不会误伤。所需飞书权限见 [configuration.md](configuration.md)（读取群信息 `im:chat:readonly`）。
+
 ## 4. 卡片交互回调（Bug 修复确认用）
 
 BugFixHandler 的 `propose` 模式需要「确认应用 / 取消」按钮，走 `card.action.trigger` 事件（见 `card_interaction_bot`）：
@@ -113,8 +142,21 @@ BugFixHandler 的 `propose` 模式需要「确认应用 / 取消」按钮，走 
 
 - 创建应用，获取 `App ID` / `App Secret`。
 - 开启**机器人**能力。
-- 事件订阅：添加 `im.message.receive_v1`（及 Bug 确认用的卡片回调）。长连接模式下选「使用长连接接收事件」。
-- 权限：至少「获取与发送单聊、群组消息」（`im:message`、`im:message:send_as_bot` 等，以后台实际项为准）。
+- 事件订阅：添加 `im.message.receive_v1`。长连接模式下选「使用长连接接收事件」。
+- 权限：至少「获取与发送单聊、群组消息」（`im:message`、`im:message:send_as_bot` 等，以后台实际项为准）；停止按钮的群管理员判断另需 `im:chat:readonly`（见 §6.1、[configuration.md](configuration.md) §2.4）。
 - 把机器人加入测试群或开启单聊后联调。
 
-具体权限 scope 清单随实现确定后回写 [configuration.md](configuration.md)。
+### 6.1 卡片回调（停止按钮 / Bug 确认按钮）
+
+卡片按钮点击走 `card.action.trigger`。本项目用**长连接（WSClient）**，回调与事件共用一条长连接，**无需公网 URL / 内网穿透**。配置步骤：
+
+1. 开发者后台 →「开发配置 / 事件与回调」，**订阅方式**选「使用长连接接收」。
+2. 在「回调」里添加 **卡片回传交互 `card.action.trigger`**（订阅方式同为长连接）。
+3. 权限管理开通并发布：`im:message`（收发消息）、`im:chat:readonly`（读群信息，群管理员停止鉴权用）。
+4. **创建并发布新版本**，权限/订阅才生效（内部应用可能需管理员审核）。
+5. 验证：群里触发长任务后点「⏹ 停止回复」，控制台应打印 `[事件] card.action.trigger stop … → stopped/forbidden/not_found`，飞书端弹出对应 toast。
+
+> 按钮的 `value`（`{ action:'stop', taskId }`）由代码在卡片里带上（`feishu/card.ts`），**无需在卡片搭建工具里另配** action。
+> 排查：点后端**无日志**通常是第 2 步回调未订阅或版本未发布；**总是 forbidden** 多为 `im:chat:readonly` 未生效（群管理员查不到 → fail-closed）。
+
+完整权限 scope 清单见 [configuration.md](configuration.md)（§2.2 修改代码 / §2.3 阅读源码 / §2.4 停止按钮）。

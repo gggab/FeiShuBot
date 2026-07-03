@@ -25,6 +25,8 @@ export interface HandlerContext {
   intent: IntentResult;
   session: SessionContext;
   reply: ReplyStream;
+  /** 取消信号：用户点卡片「停止回复」按钮时触发。透传给 CLI/LLM 流以中止处理。 */
+  signal?: AbortSignal;
 }
 
 export interface Handler {

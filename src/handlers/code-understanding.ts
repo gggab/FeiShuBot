@@ -92,6 +92,7 @@ export class CodeUnderstandingHandler implements Handler {
           prompt: buildPrompt(ctx.intent.task),
           mode: 'read',
           timeoutMs: config.cli.timeoutMs,
+          signal: ctx.signal,
         })) {
           acc += chunk;
           ctx.reply.push(chunk);
