@@ -9,13 +9,19 @@
  */
 
 import { larkClient } from './client';
-import { buildMarkdownCard } from './card';
+import { buildMarkdownCard, CardStatus } from './card';
 import { ReplyStream } from '../handlers/types';
 import { throttle } from '../util/throttle';
 import { logger } from '../util/logger';
 
 /** 卡片流式更新的节流间隔（毫秒）。 */
 const CARD_UPDATE_INTERVAL_MS = 200;
+
+/**
+ * 处理中的心跳刷新间隔（毫秒）。远宽于流式节流，仅用于在长时间静默时
+ * 刷新头部「已用时长」，让卡片不至于看起来「冻住」。
+ */
+const CARD_HEARTBEAT_INTERVAL_MS = 2000;
 
 export async function sendText(chatId: string, text: string): Promise<{ messageId: string }> {
   const res = await larkClient.im.v1.message.create({
@@ -68,16 +74,24 @@ export class CardReplyStream implements ReplyStream {
   private buffer = '';
   private messageId = '';
   private closed = false;
+  private startedAt = 0;
+  private heartbeat: NodeJS.Timeout | null = null;
   private readonly scheduleUpdate = throttle(() => {
-    if (!this.closed) void this.flush(false);
+    if (!this.closed) void this.flush('processing');
   }, CARD_UPDATE_INTERVAL_MS);
 
   constructor(private readonly chatId: string) {}
 
-  /** 发送占位卡片并记录 messageId。必须在 push 之前调用。 */
+  /** 发送占位卡片并记录 messageId，启动处理中心跳。必须在 push 之前调用。 */
   async init(placeholder = '思考中… / Thinking…'): Promise<void> {
-    const { messageId } = await sendCard(this.chatId, buildMarkdownCard(placeholder));
+    this.startedAt = Date.now();
+    const { messageId } = await sendCard(this.chatId, buildMarkdownCard(placeholder, 'processing', 0));
     this.messageId = messageId;
+    // 心跳：处理未完成时定期刷新头部「已用时长」，即使没有新增量也让用户看到仍在处理。
+    this.heartbeat = setInterval(() => {
+      if (!this.closed) void this.flush('processing');
+    }, CARD_HEARTBEAT_INTERVAL_MS);
+    this.heartbeat.unref?.();
   }
 
   push(textChunk: string): void {
@@ -87,20 +101,30 @@ export class CardReplyStream implements ReplyStream {
   }
 
   async done(finalText?: string): Promise<void> {
-    this.closed = true;
+    this.stop();
     if (finalText !== undefined) this.buffer = finalText;
-    await this.flush(true);
+    await this.flush('done');
   }
 
   async fail(message: string): Promise<void> {
-    this.closed = true;
+    this.stop();
     this.buffer = message;
-    await this.flush(true);
+    await this.flush('error');
   }
 
-  private async flush(final: boolean): Promise<void> {
+  /** 标记关闭并停止心跳；终态刷新前调用，避免心跳把状态改回「处理中」。 */
+  private stop(): void {
+    this.closed = true;
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+  }
+
+  private async flush(status: CardStatus): Promise<void> {
     try {
-      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', !final));
+      const elapsedMs = status === 'processing' ? Date.now() - this.startedAt : undefined;
+      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs));
     } catch (e) {
       // 卡片更新失败不应让整个处理流程崩溃；显式记录。
       logger.error('更新卡片失败:', e);

@@ -73,6 +73,19 @@ function buildCard(content: string) {
 
 节流封装放在 `feishu/reply.ts`，对 Handler 暴露为 `ReplyStream`（见 [handlers.md](handlers.md)）。
 
+### 3.1 处理状态可视化（卡片头部 + 心跳）
+
+后端处理往往有**较长的静默段**（CLI 冷启动、`git fetch`、两段输出之间的等待）。仅靠正文文本，用户无法判断「还在跑」还是「卡死了」，一旦失败也只能靠读正文分辨。为此卡片带**状态头部**并在处理中**心跳刷新已用时长**：
+
+- `buildMarkdownCard(content, status, elapsedMs?)` 按状态渲染带颜色的 `header`：
+  - `processing` → 蓝色「⏳ 处理中…」，副标题显示已用时长（如「已用时 12s」），`streaming_mode: true`；
+  - `done` → 绿色「✅ 已完成」，`streaming_mode: false`；
+  - `error` → 红色「❌ 处理失败」，`streaming_mode: false`。
+- `CardReplyStream` 在 `init()` 记录起始时刻并启动**心跳定时器**（默认 2s）：处理未完成时即使没有新增量，也定期 `patch` 刷新副标题的已用时长，卡片不会看起来「冻住」。`done()`/`fail()` 关闭心跳并切到终态头部。
+- 心跳间隔（2s）远宽于流式节流（200ms），对频繁更新限制友好；每次刷新副标题时长都在变化，避免「内容未变」的无效 `patch`。
+
+> 状态与头部映射集中在 `feishu/card.ts` 的 `CARD_STATUS`；心跳间隔为 `feishu/reply.ts` 的 `CARD_HEARTBEAT_INTERVAL_MS`。
+
 ## 4. 卡片交互回调（Bug 修复确认用）
 
 BugFixHandler 的 `propose` 模式需要「确认应用 / 取消」按钮，走 `card.action.trigger` 事件（见 `card_interaction_bot`）：
