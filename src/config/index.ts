@@ -69,6 +69,9 @@ export const config = {
     bugfixTimeoutMs: int('BUGFIX_TIMEOUT_MS', 1200000),
     // Bug 修复 worktree 基目录（默认系统临时目录）。会展开为长路径，避开 Windows 8.3 短名。
     worktreeDir: str('WORKTREE_DIR'),
+    // 容器部署：关闭 codex 自带 bwrap 沙箱（容器已是隔离边界），否则 bwrap 在容器内
+    // 创建 network namespace 配 loopback 失败。仅对 CLI_PROVIDER=codex 生效。见 docs/handlers.md §6。
+    codexUnsandboxed: bool('CODEX_UNSANDBOXED', false),
   },
   gitlab: {
     baseUrl: str('GITLAB_BASE_URL'),

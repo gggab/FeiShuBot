@@ -134,6 +134,7 @@ interface CliRunner {
 - `process.ts`：用 `child_process.spawn` 启动，逐块读取 stdout（必要时解析 stream-json），统一超时与 `AbortSignal` 取消；进程退出码非 0 时抛出（不吞错）。
 - `claude.ts`（Claude Code）：非交互执行（`-p <prompt> --output-format stream-json --verbose`），工作目录设为 `cwd`。read 模式 `--allowedTools Read Grep Glob`；write 模式 `--permission-mode acceptEdits --allowedTools Read Grep Glob Edit Write MultiEdit`。解析 stream-json 事件：assistant 文本块进卡片，思考/工具调用打印到控制台，`result` 文本兜底。
 - `codex.ts`（Codex / ChatGPT CLI）：非交互执行 `codex exec --json <prompt>`，工作目录同样由 spawn 的 `cwd` 决定。read 模式 `--sandbox read-only`；write 模式 `--sandbox workspace-write`。带 `--skip-git-repo-check`（注册表只保证目录存在，不保证是 git 仓库）。解析 JSONL 事件：`item.completed` 且 `item.type === "agent_message"` 的 `item.text` 进卡片；`reasoning`/`command_execution`/`file_change` 打印到控制台；收到 `turn.failed` 或流级 `error` 事件**显式抛错**（进程可能仍以 0 退出，不能只靠退出码）。无头鉴权用 `CODEX_API_KEY` 环境变量（见 docs/deployment.md §4）。
+  **容器部署（`CODEX_UNSANDBOXED=true`）**：两种模式都改用 `--sandbox danger-full-access`，关掉 codex 自带的 bwrap 沙箱——Docker 容器内 bwrap 无法为沙箱创建 network namespace 配 loopback（`RTM_NEWADDR: Operation not permitted`）。关沙箱后 codex 的读/写限制不再由沙箱内核层强制，而由**容器隔离 + 目录白名单（`cwd` 必来自注册表）+ 触发人授权名单**（§2/§2.2/§2.3）三层保证；这是 CI/容器里跑 codex 的标准姿势。仅本机开发（非容器）时保持 `false`，走原生沙箱。
   两个 Windows 实机踩过的坑（已在实现中处理）：① 子进程 stdin 必须关闭（`stdio` stdin=ignore），否则 `codex exec` 在非 TTY 下会等 stdin EOF 直到超时；② `CLI_BIN` 直指裸 `codex.exe` 时绕过了 shim，codex 自带的 rg 等工具不在 PATH 上（探索代码会慢到超时），`codexToolPathDirs` 会把二进制同目录及相邻 `path/` 目录补进子进程 PATH。
 - 选择哪个 Runner：由 `CLI_PROVIDER` 配置（默认 `claude`），意图无关；未来可按项目或任务覆盖。
 

@@ -34,6 +34,7 @@
 | `CODEX_API_KEY` | `codex` 时 | — | Codex CLI 无头鉴权（本应用不读，由 codex 子进程继承环境变量） |
 | `CLI_TIMEOUT_MS` | | `300000` | 只读代码理解超时（5 分钟） |
 | `BUGFIX_TIMEOUT_MS` | | `1200000` | Bug 修复（写）超时（20 分钟；定位+修改更耗时） |
+| `CODEX_UNSANDBOXED` | | `false` | 仅 `codex`：`true` 时用 `--sandbox danger-full-access` 关掉 codex 自带 bwrap 沙箱。**容器部署必须置 true**（Docker 内 bwrap 无法建 network namespace 配 loopback，会报 `RTM_NEWADDR: Operation not permitted`）；此时读/写边界由容器隔离 + 注册表路径白名单 + 触发人授权名单保证。见 [handlers.md](handlers.md) §6 |
 
 ### Bug 修复 / GitLab（MR 工作流）
 BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发起人（见 handlers.md §3）。

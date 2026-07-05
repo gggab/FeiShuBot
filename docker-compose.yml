@@ -17,6 +17,11 @@ services:
     environment:
       SESSION_DB_FILE: /app/data/session.db
       WORKTREE_DIR: /app/worktrees
+      # Disable codex's own bwrap sandbox: it can't create a network namespace /
+      # configure loopback inside Docker (RTM_NEWADDR: Operation not permitted).
+      # The container is the isolation boundary. No-op when CLI_PROVIDER=claude.
+      # See docs/handlers.md §6 / docs/deployment.md §4.
+      CODEX_UNSANDBOXED: "true"
     ports:
       - "3000:3000"
     volumes:

@@ -47,6 +47,16 @@ describe('buildCodexArgs', () => {
     const args = buildCodexArgs({ cwd: '/x', prompt, mode: 'read' });
     expect(args).toContain(prompt);
   });
+
+  it('unsandboxed=true（容器部署）：两种模式都用 danger-full-access', () => {
+    const read = buildCodexArgs({ cwd: '/x', prompt: 'explain', mode: 'read' }, true);
+    expect(read.join(' ')).toContain('--sandbox danger-full-access');
+    expect(read.join(' ')).not.toContain('read-only');
+
+    const write = buildCodexArgs({ cwd: '/x', prompt: 'fix', mode: 'write' }, true);
+    expect(write.join(' ')).toContain('--sandbox danger-full-access');
+    expect(write.join(' ')).not.toContain('workspace-write');
+  });
 });
 
 async function* lines(...ls: string[]): AsyncIterable<string> {

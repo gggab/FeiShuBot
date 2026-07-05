@@ -8,6 +8,9 @@
  *   只靠退出码会把失败吞成空回复（No hidden errors）。
  *
  * 沙箱即读写边界：read 模式 --sandbox read-only；write 模式 --sandbox workspace-write。
+ * 容器部署：置 CODEX_UNSANDBOXED=true 时两种模式都用 --sandbox danger-full-access，
+ * 关掉 codex 自带的 bwrap 沙箱（Docker 容器内 bwrap 无法创建 network namespace 配
+ * loopback），改由容器隔离 + 注册表路径白名单 + 触发人授权名单兜底。见 docs/handlers.md §6。
  * 无头鉴权：CODEX_API_KEY 环境变量（子进程继承，见 docs/deployment.md §4）。
  */
 
@@ -31,14 +34,17 @@ export function codexToolPathDirs(binPath: string, exists: (p: string) => boolea
   return [binDir, path.join(path.dirname(binDir), 'path')].filter(exists);
 }
 
-export function buildCodexArgs(task: CliTask): string[] {
+export function buildCodexArgs(task: CliTask, unsandboxed = false): string[] {
+  // unsandboxed（容器部署）：danger-full-access 让 codex 不再嵌套 bwrap 沙箱；
+  // 否则按模式映射：read → read-only，write → workspace-write。
+  const sandbox = unsandboxed ? 'danger-full-access' : task.mode === 'read' ? 'read-only' : 'workspace-write';
   return [
     'exec',
     '--json',
     // 注册表只保证目录存在，不保证是 git 仓库；不带此参数时 codex 会拒绝在非仓库目录运行。
     '--skip-git-repo-check',
     '--sandbox',
-    task.mode === 'read' ? 'read-only' : 'workspace-write',
+    sandbox,
     task.prompt,
   ];
 }
@@ -165,7 +171,7 @@ export class CodexCliRunner implements CliRunner {
 
   async *run(task: CliTask): AsyncIterable<string> {
     const cmd = config.cli.bin || 'codex';
-    const args = buildCodexArgs(task);
+    const args = buildCodexArgs(task, config.cli.codexUnsandboxed);
     logger.info(`[CLI] 调用 ${this.name} mode=${task.mode} cwd=${task.cwd}`);
     logger.info(`[CLI] 命令: ${cmd} ${formatArgsForLog(args)}`);
 
