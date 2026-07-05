@@ -29,6 +29,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code @openai/codex \
+    # The node base image ships a `node` user at UID 1000; drop it so appuser can
+    # own UID 1000 (matches the typical host login uid so the read-only ~/.ssh mount
+    # for git push stays readable). See docs/deployment.md §3.
+    && { userdel -r node 2>/dev/null || true; } \
     && useradd -m -u 1000 appuser
 
 COPY --from=builder /app/node_modules ./node_modules
