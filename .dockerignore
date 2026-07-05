@@ -21,6 +21,8 @@ session.db-shm
 tests
 docs
 *.md
+# IDENTITY.md is COPYed into the image (Dockerfile) as the baked-in default; keep it in context.
+!IDENTITY.md
 
 data
 worktrees
