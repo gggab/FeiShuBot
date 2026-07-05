@@ -35,6 +35,12 @@
 | `CLI_TIMEOUT_MS` | | `300000` | 只读代码理解超时（5 分钟） |
 | `BUGFIX_TIMEOUT_MS` | | `1200000` | Bug 修复（写）超时（20 分钟；定位+修改更耗时） |
 | `CODEX_UNSANDBOXED` | | `false` | 仅 `codex`：`true` 时用 `--sandbox danger-full-access` 关掉 codex 自带 bwrap 沙箱。**容器部署必须置 true**（Docker 内 bwrap 无法建 network namespace 配 loopback，会报 `RTM_NEWADDR: Operation not permitted`）；此时读/写边界由容器隔离 + 注册表路径白名单 + 触发人授权名单保证。见 [handlers.md](handlers.md) §6 |
+| `REPOS_ROOT` | | 从注册表推导 | 代码理解/路由的 `/repos` 作用域根（所有已注册仓库的公共父目录）。留空时由注册表各 `path` 推导；仓库不在同一父目录时须显式指定。见 [handlers.md](handlers.md) §9 |
+| `AGENT_INTROS_DIR` | | `.agent-intros` | 工程简介目录名（相对 `reposRoot`）。每工程一份 `<别名>.md`，放在仓库外，不污染各仓库 `git status` |
+| `INTRO_REGEN_FILES` | | `8` | 简介「重写」阈值：距上次生成，改动文件数 ≥ 此值则整份重写（否则增量 update） |
+| `INTRO_REGEN_LINES` | | `400` | 简介「重写」阈值：增删行数合计 ≥ 此值则整份重写 |
+| `INTRO_REFRESH_DEBOUNCE_MS` | | `20000` | 连续 `/git` 变更去抖窗口（ms）：窗口内多次触发合并为一次刷新 |
+| `INTRO_REFRESH_MIN_INTERVAL_MS` | | `600000` | 同一工程两次刷新最小间隔（ms）：频繁切分支在此窗口内只刷一次。见 [handlers.md](handlers.md) §9.3 |
 
 ### Bug 修复 / GitLab（MR 工作流）
 BugFixHandler 从测试分支切修复分支 → 提交 → 建 MR → 指派发起人（见 handlers.md §3）。

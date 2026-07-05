@@ -11,9 +11,10 @@ import { CliRunner } from '../cli/runner';
 import { GitWorkspace } from '../git/workspace';
 import { GitLabClient, GitlabUserRef } from '../gitlab/client';
 import { ContactService } from '../feishu/contact';
-import { resolveProject } from './resolve-project';
 import { projects, getGitlabUser } from '../config/projects';
 import { isAuthorizedToModify, splitUserEntries } from '../auth/authorization';
+import { buildRoutingLocatePrompt } from '../repos/prompts';
+import { parseDeclaredProject } from '../repos/routing';
 import { config } from '../config';
 import { logger } from '../util/logger';
 import { buildFixBranch, buildCommitMessage, buildBugfixPrompt, buildMrDescription } from './bugfix-naming';
@@ -42,11 +43,34 @@ export class BugFixHandler implements Handler {
 
   constructor(
     private readonly runner: CliRunner,
+    /** /repos 作用域根：用于 codex 前置路由定位工程（见 docs/handlers.md §9.2）。 */
+    private readonly reposRoot: string,
     private readonly gitlab: GitLabClient | null,
     private readonly allowlist: string[],
     private readonly allowedDepartments: string[],
     private readonly contact: ContactService | null
   ) {}
+
+  /**
+   * 前置路由：在 /repos 作用域跑一次只读 codex，读 AGENTS.md/简介判定工程别名。
+   * BugFix 必须落在确定工程上（建 worktree、按其 gitlabProjectId/baseBranch 提 MR），
+   * 不能像代码理解那样在 /repos 漫游。判不出 → 返回 undefined，由调用方追问。
+   */
+  private async locateProject(ctx: HandlerContext): Promise<string | undefined> {
+    const aliases = Object.keys(projects);
+    if (aliases.length === 0) return undefined;
+    let acc = '';
+    for await (const chunk of this.runner.run({
+      cwd: this.reposRoot,
+      prompt: buildRoutingLocatePrompt(ctx.intent.task),
+      mode: 'read',
+      timeoutMs: config.cli.timeoutMs,
+      signal: ctx.signal,
+    })) {
+      acc += chunk;
+    }
+    return parseDeclaredProject(acc, aliases);
+  }
 
   /**
    * 部门白名单为主、人员白名单（open_id 或邮箱）兜底。
@@ -102,12 +126,17 @@ export class BugFixHandler implements Handler {
       return;
     }
 
-    const resolved = resolveProject(ctx.intent.project, projects);
-    if (!resolved.ok) {
-      await ctx.reply.done(resolved.message);
+    // 前置路由：让 codex 借 AGENTS.md/简介判定工程（不再依赖意图识别器预选的 project）。
+    ctx.reply.push('🔎 正在定位要修复的工程…\n');
+    const alias = await this.locateProject(ctx);
+    if (!alias || !projects[alias]) {
+      await ctx.reply.done(
+        `未能确定要修复哪个工程，请在描述中点名工程（如「std-smart-office-room」）后重试。\n可用工程：${Object.keys(projects).join('、')}`
+      );
       return;
     }
-    const { alias, config: proj } = resolved;
+    const proj = projects[alias];
+    logger.info(`[Bug修复] 路由定位 → ${alias}`);
 
     if (!proj.gitlabProjectId) {
       await ctx.reply.done(`项目「${alias}」未配置 gitlabProjectId，无法走 MR 流程（仅支持代码理解）。`);

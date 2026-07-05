@@ -35,6 +35,8 @@ import { BugFixHandler } from './handlers/bug-fix';
 import { KnowledgeQaHandler } from './handlers/knowledge-qa';
 import { GitCommandHandler } from './handlers/git-command';
 import { KeyedMutex } from './util/repo-lock';
+import { resolveReposRoot } from './repos/scope';
+import { IntroMaintainer } from './repos/maintainer';
 
 /** 核心必填配置：缺任一项无法提供基础能力（收发消息 + 意图/聊天）。 */
 function validateCoreConfig(): void {
@@ -107,16 +109,54 @@ function main(): void {
     model: config.llm.intentModel,
     minConfidence: config.llm.intentMinConfidence,
   });
-  // 仓库级锁：代码阅读与 /git 运维共享，避免阅读期间被切分支/拉取覆盖。
+
+  // /repos 作用域：代码理解/BugFix 让 codex 读 AGENTS.md + 工程简介自行定位工程（见 docs/handlers.md §9）。
+  // 推导失败（如跨盘符）不致命：仅禁用 /repos 路由，其余功能照常。
+  let reposRoot = '';
+  let maintainer: IntroMaintainer | null = null;
+  if (aliases.length > 0) {
+    try {
+      reposRoot = resolveReposRoot(projects, config.repos.root);
+      maintainer = new IntroMaintainer({
+        runner: cliRunner,
+        reposRoot,
+        registry: projects,
+        introsDirName: config.repos.introsDirName,
+        thresholds: { files: config.repos.introRegenFiles, lines: config.repos.introRegenLines },
+        timeoutMs: config.cli.timeoutMs,
+        refreshDebounceMs: config.repos.introRefreshDebounceMs,
+        refreshMinIntervalMs: config.repos.introRefreshMinIntervalMs,
+      });
+      maintainer.writeAgentsDocs();
+      logger.info(`Repos 作用域  : ${reposRoot}（简介目录 ${config.repos.introsDirName}）`);
+      // 缺失简介后台预生成（逐个跑 CLI，较慢）；失败只记日志，不阻塞启动。
+      void maintainer.ensureAllIntros().catch((e) => logger.warn(`[简介] 预生成失败: ${(e as Error).message}`));
+    } catch (e) {
+      logger.warn(`Repos 作用域  : 推导失败，已禁用 /repos 路由（设置 REPOS_ROOT 可修复）：${(e as Error).message}`);
+    }
+  }
+
+  // 仓库级锁：仅 /git 运维之间与 BugFix 单仓库互斥用（代码理解已放弃仓库锁，见 §9.4）。
   const repoLock = new KeyedMutex();
   const registry = new HandlerRegistry([
     new ChatHandler(llm, identity),
-    new CodeUnderstandingHandler(cliRunner, codeReadAllowlist, codeReadAllowedChats, contact, repoLock),
-    new BugFixHandler(cliRunner, gitlab, codeWriteAllowlist, allowedDepartments, contact),
+    new CodeUnderstandingHandler(cliRunner, reposRoot, projects, codeReadAllowlist, codeReadAllowedChats, contact),
+    new BugFixHandler(cliRunner, reposRoot, gitlab, codeWriteAllowlist, allowedDepartments, contact),
     new KnowledgeQaHandler(dify),
   ]);
-  // /git 运维命令：复用「代码修改授权」（同 BugFix 白名单）。
-  const gitCommand = new GitCommandHandler(projects, codeWriteAllowlist, allowedDepartments, contact, repoLock);
+  // /git 运维命令：复用「代码修改授权」（同 BugFix 白名单）；成功 pull/switch 后刷新对应工程简介。
+  const gitCommand = new GitCommandHandler(
+    projects,
+    codeWriteAllowlist,
+    allowedDepartments,
+    contact,
+    repoLock,
+    undefined,
+    undefined,
+    // 成功 pull/switch 后仅「标记待刷新」，实际刷新由维护器去抖+节流+单飞择机进行，
+    // 避免频繁切分支时反复重跑简介生成（见 docs/handlers.md §9.3）。
+    maintainer ? (alias: string) => maintainer!.markDirty(alias) : undefined
+  );
   // 群管理员服务：用于卡片「停止回复」按钮的权限判断（发起人 / 群主 / 群管理员）。
   const chatAdmin = new ChatAdminService(createLarkChatAdminFetcher());
   const controller = new MessageController(recognizer, registry, gitCommand, chatAdmin);

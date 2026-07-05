@@ -76,7 +76,9 @@ export class GitCommandHandler {
       const reply = new CardReplyStream(chatId);
       await reply.init();
       return reply;
-    }
+    },
+    /** pull/switch 使 HEAD 变化后回调（用于按变更量刷新工程简介，见 docs/handlers.md §8/§9.3）。 */
+    private readonly onRepoChanged: (alias: string) => void = () => {}
   ) {}
 
   matches(text: string): boolean {
@@ -153,12 +155,14 @@ export class GitCommandHandler {
             return formatVersionFooter(name, await this.ops.version(p.config.path));
           case 'pull': {
             const r = await this.ops.pull(p.config.path);
+            if (r.updated) this.onRepoChanged(p.alias); // HEAD 变化 → 触发简介刷新
             return r.updated
               ? `✅ ${name}：分支 \`${r.branch}\` ${r.before} → ${r.after}（${r.subject}，${r.relDate}）`
               : `✅ ${name}：已是最新 分支 \`${r.branch}\` @ ${r.after}`;
           }
           case 'switch': {
             const r = await this.ops.switchRef(p.config.path, cmd.ref);
+            this.onRepoChanged(p.alias); // 切换分支/标签 → 触发简介刷新
             return `✅ ${name}：已切换 · ${describeVersion(r.version)}`;
           }
         }

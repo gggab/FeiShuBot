@@ -73,6 +73,18 @@ export const config = {
     // 创建 network namespace 配 loopback 失败。仅对 CLI_PROVIDER=codex 生效。见 docs/handlers.md §6。
     codexUnsandboxed: bool('CODEX_UNSANDBOXED', false),
   },
+  repos: {
+    // /repos 作用域根：空则由注册表各 path 推导公共父目录（见 src/repos/scope.ts）。
+    root: str('REPOS_ROOT'),
+    // 工程简介目录名（相对 reposRoot）；每工程一份 <别名>.md，放在仓库外。
+    introsDirName: str('AGENT_INTROS_DIR', '.agent-intros'),
+    // 简介「重写」阈值：距上次生成，改动文件数/增删行数达标则整份重写，否则增量更新。
+    introRegenFiles: int('INTRO_REGEN_FILES', 8),
+    introRegenLines: int('INTRO_REGEN_LINES', 400),
+    // 刷新调度：连续 /git 变更去抖窗口 + 单工程两次刷新最小间隔（防频繁切分支狂刷）。
+    introRefreshDebounceMs: int('INTRO_REFRESH_DEBOUNCE_MS', 20000),
+    introRefreshMinIntervalMs: int('INTRO_REFRESH_MIN_INTERVAL_MS', 600000),
+  },
   gitlab: {
     baseUrl: str('GITLAB_BASE_URL'),
     token: str('GITLAB_TOKEN'),

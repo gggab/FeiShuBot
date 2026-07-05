@@ -34,18 +34,17 @@ interface Handler {
 
 **权限强制校验（fail-closed）**：`handle()` 第一步校验 `isAuthorizedToRead`——消息所在群 `chat_id` 命中群白名单 **或** 触发人命中人员白名单（`open_id` 或**邮箱**）才放行；两份名单皆空 → 拒绝所有人。不命中 → 卡片回「⛔ 无权限」并记审计日志，不进入阅读流程。只按「群 / 人」维度，不涉及部门。人员白名单含邮箱时经 `ContactService` 解析比对（带缓存），解析失败=邮箱维度不命中。配置与所需飞书权限见 [configuration.md](configuration.md) §2.3。
 
+**路由方式（重要，见 §9）**：不再由意图识别器预选 `project`、也不再把 codex 闭合在单个仓库。改为 **codex 在 `/repos` 作用域**（所有仓库的公共父目录）内，读 `/repos/AGENTS.md` + 各工程「简介」自行判断用户问的是哪个工程，只读阅读该工程源码作答，并在正文末尾用 `__PROJECT__: <别名>` 声明所依据的工程。因此本 Handler **不用 `resolveProject`、不加仓库锁**（放弃「阅读中防切分支」，见 §9 的取舍说明）。
+
 流程：
-1. 解析目标项目：`ctx.intent.project` → `ProjectRegistry.resolve()` 得到绝对路径。
-   - 无 `project` 且注册表只有一个项目 → 用默认项目。
-   - 无 `project` 且有多个 → **追问**用户选择哪个项目（不臆测）。
-   - `project` 不在允许列表 → 显式拒绝（安全边界）。
-2. 组装 CLI prompt：把 `intent.task` 包成「请阅读本仓库并解释 …，只读、不要修改文件」。
-3. `CliRunner.run({ cwd, prompt, mode: 'read' })`，stdout 增量经 `reply.push` 流式回卡片。
-4. 结束 `reply.done()`，末尾追加**版本页脚**；异常 `reply.fail()`。
+1. 组装 CLI prompt：把 `intent.task` 包成「先读 AGENTS.md/简介定位工程，只读阅读该工程源码解释 …，禁止修改文件，末尾声明 `__PROJECT__`」。
+2. `CliRunner.run({ cwd: reposRoot, prompt, mode: 'read' })`，stdout 增量经 `reply.push` 流式回卡片。
+3. 从输出解析 `__PROJECT__` 得到别名 → **事后**对该工程仓库采样版本，追加**版本页脚**；声明缺失/非法则页脚降级为「无法确定所依据工程」。
+4. 结束 `reply.done()`（正文剥掉声明行）；异常 `reply.fail()`。
 
-**读的是当前 checkout**：只在 `config.path` 那个本地仓库当前 HEAD 上只读阅读，**不 fetch、不切分支**（要更新/切版本用 §8 的 `/git` 命令）。因此回答基于什么代码，取决于该仓库此刻的分支/提交。
+**读的是当前 checkout**：只在各本地仓库当前 HEAD 上只读阅读，**不 fetch、不切分支**（要更新/切版本用 §8 的 `/git` 命令）。因此回答基于什么代码，取决于该仓库此刻的分支/提交。
 
-**版本页脚（透明化）**：每次回答末尾追加一行，说明本次基于哪个版本作答，形如
+**版本页脚（透明化）**：回答末尾追加一行（**跨工程时每个声明工程一行**），说明本次基于哪个版本作答（**依据 codex 声明的 `__PROJECT__` 工程事后采样**），形如
 `📌 基于 **std-smart-office-portal（portal）** · 分支 \`develop\` · 提交 \`a1b2c3d\`（<最近提交标题>，2 天前）`；工作区有未提交改动追加「⚠️ 工作区有未提交改动」，游离 HEAD 则显示 tag 名或「游离 HEAD」。项目名取**本地仓库目录名**作为「工程完整名字」，别名不同则括号附上（`projectLabel`，便于回敲命令）。由 `git/inspect.ts`（`getRepoVersion`/`formatVersionFooter`，只读 rev-parse/log/status）在**仓库级锁内**采样，保证与实际被读代码一致；采样失败降级为「无法读取版本信息」，不阻断回答。
 
 约束：read 模式下提示词明确「禁止修改文件」；CLI 适配层尽量用只读/计划模式参数（见 §6）。**并发**：与 `/git` 运维共享仓库级锁（`util/repo-lock.ts`），阅读期间该仓库不会被切分支/拉取。
@@ -139,7 +138,7 @@ interface CliRunner {
 - 选择哪个 Runner：由 `CLI_PROVIDER` 配置（默认 `claude`），意图无关；未来可按项目或任务覆盖。
 
 安全要点：
-- **目录白名单**：`cwd` 必须来自 Project Registry 解析，拒绝任意路径，防止越权读写。
+- **目录白名单**：`cwd` 必须来自 Project Registry（写类操作如 BugFix 仍闭合在单个仓库/worktree）。**例外——代码理解（§9）**：`cwd` = `reposRoot`（所有已注册仓库的公共父目录，由注册表路径推导或 `REPOS_ROOT` 指定），codex 一次可只读整个 `/repos` 子树。此时安全边界不再是「单目录」，而由 **`reposRoot` 白名单 + 触发人授权名单（§2）+ 容器隔离** 共同兜底；简介文件写入限定在 `reposRoot/<简介目录>`，不落进任何 git 仓库。
 - **提示词即输入**：用户文本只作为 CLI 的 prompt 内容，不拼进 shell（用参数数组传递，避免命令注入）。
 - **并发**：Controller 层按**会话**串行排队（`${userId}:${chatId}`，见 [feishu-integration.md](feishu-integration.md) §2.2）；同一仓库的 CLI 读/写再叠加**仓库级锁**（`util/repo-lock.ts`），避免本地资源被打满、读到一半被切分支。
 - **超时**：到时终止子进程并回报。
@@ -172,3 +171,55 @@ interface CliRunner {
   - 分支/标签不存在、网络/凭据错误等**非预期**失败 → `reply.fail` 显式报错。
 - **并发**：与代码阅读**共享仓库级锁**（`util/repo-lock.ts`，按 `config.path` 键控），同一仓库的读/切/拉串行，避免读到一半被切走。
 - 实现：`git/ops.ts`（`defaultGitOps`：`pull`/`switchRef`，注入式便于测试）+ `git/inspect.ts`（版本快照）+ `handlers/git-command.ts`（解析/授权/编排）。
+- **简介刷新钩子（见 §9）**：`pull`/`switch` 成功且 HEAD 变化后，对该工程按变更量刷新简介（skip/update/regenerate），使后续路由基于最新代码。刷新失败只记日志、不影响 `/git` 结果。
+
+## 9. `/repos` 作用域路由与工程简介（自维护）
+
+**要解决的问题**：用户常用**完整仓库名**（如 `std-smart-office-room`）指代工程，但注册表里是**短别名**（`room`）。旧设计让意图识别器预选别名、匹配不上就静默回退到 `default`（portal），导致「问 A 答 B」。本节改为让 **codex 自己借助工程简介判断**，不靠人工维护别名映射。
+
+### 9.1 作用域与目录布局
+
+- **`reposRoot`**：所有已注册仓库的**公共父目录**（对生产 `/repos/std-smart-office-*` 即 `/repos`）。由注册表各 `path` 推导；可用 `REPOS_ROOT` 覆盖（见 [configuration.md](configuration.md)）。
+- **`reposRoot/AGENTS.md`、`reposRoot/CLAUDE.md`**：由 bot **启动时自动生成**（从注册表），`CLAUDE.md` 仅 `@AGENTS.md` 引用同一份内容。含「别名→目录→简介路径」索引表 + 对 codex 的路由约束。**自动生成、请勿手改**。**仅当内容较现有文件变化时才覆盖**（注册表没变就跳过写入，不做无谓改动）——所以「已生成后为何还重复生成」其实不会重复落盘，只是每次启动对齐注册表这一事实来源。
+- **简介目录 `reposRoot/<简介目录>/`**（默认 `.agent-intros/`，可配）：每个工程一份 `<别名>.md`。放在仓库**外面**——只读沙箱写不进仓库、且不污染任何仓库的 `git status`（前提是 `reposRoot` 本身不在 git 管理下，否则用 `.gitignore` 排除）。
+
+### 9.2 路由（代码理解 / BugFix 定位共用）
+
+codex 以 `cwd = reposRoot` 运行，`AGENTS.md` 要求它：
+1. 先读各工程简介，判断用户问的是哪个工程；
+2. 只做只读分析；**允许跨工程阅读**——问题涉及前后端联动的完整链路时（如前端 `xxx-frontend` 与其后端服务），可同时只读阅读相关的多个工程，把端到端逻辑讲清楚，但聚焦相关工程、不翻无关工程；
+3. 正文最后单独一行输出 `__PROJECT__: <别名>` 声明依据的工程；**跨工程时列出全部、用逗号分隔**（如 `__PROJECT__: portal, user`）。
+
+系统据 `__PROJECT__` 采样**每个**声明工程的版本作页脚（§2，多工程 → 多行页脚），并从展示正文里剥掉声明行。声明缺失/非法 → 页脚降级、不阻断回答。
+- **代码理解**：只读，`mode: 'read'`，可跨工程。
+- **BugFix**：不能在 `/repos` 漫游改码——先跑一次**只读路由 pass**（`cwd=reposRoot`）拿到**唯一主工程别名**（`__PROJECT__` 的第一个），再走 §3 原有的 worktree/MR 流程（对该别名建 worktree、按其 `gitlabProjectId`/`baseBranch` 提 MR）。修复落盘仍限单工程；跨工程仅用于「阅读理解」。这样 §7 抱怨的错路由在 BugFix 上也一并修复。
+
+### 9.3 简介生成与更新（自维护）
+
+- **与分支无关**：简介描述「这个工程是什么」，是**分支无关**的，因此始终基于**当前 checkout 的 HEAD**生成，不绑定任何固定分支（前端 `release`/`develop`、后端 `release-v1.xxx`/大量 `feat/` 都无需特殊配置）。frontmatter 记录生成时的 commit（分支名可记作参考，但不作为键，不为每个分支存多份——那样只会数量爆炸而对「路由」无收益）。
+- **懒生成**：某工程无简介时，跑一次 codex **只读**（`cwd = 该仓库`，`mode: 'read'`）读源码、**只输出简介正文**；由 **bot 落盘**（bot 有文件系统权限，写 `reposRoot/<简介目录>/<别名>.md`，并补上含 **commit SHA** 的 frontmatter）。这样生成过程本身仍是只读，不需要写沙箱，简介文件的路径/frontmatter 由 bot 掌控。
+- **按变更量更新**：以简介记录的 SHA 为基线，`git diff --stat <SHA>..HEAD` 得到「改动文件数 / 增删行数」：
+  - 无变化 → **skip**；
+  - 小改（低于阈值）→ **update**：把现有简介 + diff 摘要喂给 codex，让它只读输出修订后的简介正文，bot 覆盖落盘；
+  - 大改（≥ `INTRO_REGEN_FILES` 或 `INTRO_REGEN_LINES`）→ **regenerate**：整份重写。
+  - 更新后刷新 frontmatter 的 SHA。阈值可配（见 [configuration.md](configuration.md)）。
+- **触发点**：① 启动时对缺失简介懒生成；② `/git pull|switch` 成功后（§8 钩子）**标记该工程待刷新**（不立即重跑）；③ 路由 pass 若发现仍缺简介可就地补。生成/更新失败只记日志、降级（无简介时路由仅少一条线索，不致命）。
+- **刷新调度（抗频繁切分支）**：`/git` 钩子只调 `markDirty(alias)`，实际刷新由维护器统一择机进行，三重保护：
+  - **去抖**（`INTRO_REFRESH_DEBOUNCE_MS`）：连续切换合并为一次；
+  - **节流**（`INTRO_REFRESH_MIN_INTERVAL_MS`）：同一工程在窗口内只刷一次，频繁在 `develop`/`feat/*`/`release-v1.x` 间跳来跳去也不会反复重跑昂贵的 CLI 生成；
+  - **单飞**：同一工程同时只跑一个刷新，避免多个 CLI 并发读同一仓库、结束时相互覆盖简介文件。
+  - **游离 HEAD 跳过**：切到 tag/裸提交（`switch` 到标签）是「临时看看」，不刷新已有简介，避免被临时态污染（简介缺失时仍会生成，因为简介与分支无关）。
+
+### 9.4 取舍（相对旧设计）
+
+- **放弃仓库锁与「阅读中防切分支」**（已确认）：代码理解不再持有仓库级锁，读到一半可能被他人 `/git switch` 改变 HEAD；页脚按声明工程事后采样，可能与读取瞬间略有偏差。换取的是 codex 在 `/repos` 自主路由。仓库锁仍用于 `/git` 命令之间、以及 BugFix 的单仓库互斥。
+- **安全边界放宽**：代码理解的 `cwd` 从单目录变为 `reposRoot`，codex 可只读整个 `/repos`；由 `reposRoot` 白名单 + 触发人授权（§2）+ 容器隔离兜底（见 §6）。
+
+### 9.5 可测试点
+
+- `reposRoot` 推导：多仓库公共父目录 / 单仓库取父级 / 无公共父目录报错 / `REPOS_ROOT` 覆盖。
+- `AGENTS.md` 生成：索引表含全部别名与目录/简介路径；`CLAUDE.md` 为 `@AGENTS.md`；**内容未变则跳过写入**。
+- 简介 frontmatter：format→parse 往返；缺字段容错。
+- 变更量决策：0 改动=skip、小改=update、超阈值=regenerate（边界值）。
+- 刷新调度：节流窗口内重复标记不重跑、过窗后再刷；游离 HEAD（切 tag）跳过刷新（简介缺失仍生成）。
+- 声明解析：单个/**逗号分隔多个**（跨工程）`__PROJECT__`、按序去重、校验别名、剥离声明行；缺失/非法→空；主工程取第一个（BugFix 用）。

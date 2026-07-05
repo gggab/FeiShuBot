@@ -1,39 +1,32 @@
 /**
- * 代码理解 Handler：在目标项目目录内调本地 CLI 只读阅读源码并解释。
- * 设计对齐 docs/handlers.md §2。
+ * 代码理解 Handler：在 /repos 作用域内让本地 CLI 读 AGENTS.md + 工程简介自行定位工程，
+ * 只读阅读该工程源码并解释；据 codex 声明的工程事后采样版本作页脚。
+ * 设计对齐 docs/handlers.md §2 / §9。
  */
 
 import { Handler, HandlerContext } from './types';
 import { CliRunner } from '../cli/runner';
-import { resolveProject } from './resolve-project';
-import { projects } from '../config/projects';
+import { ProjectRegistry } from '../config/projects';
 import { isAuthorizedToRead, splitUserEntries } from '../auth/authorization';
 import { projectLabel } from './resolve-project';
 import { ContactService } from '../feishu/contact';
-import { KeyedMutex } from '../util/repo-lock';
 import { versionFooter } from '../git/inspect';
+import { buildRoutingReadPrompt } from '../repos/prompts';
+import { parseDeclaredProjects, stripDeclaration } from '../repos/routing';
 import { config } from '../config';
 import { logger } from '../util/logger';
-
-function buildPrompt(task: string): string {
-  return [
-    '请阅读当前所在仓库的源码，回答下面的问题。要求：',
-    '- 仅做只读分析，禁止修改任何文件。',
-    '- 用简洁中文说明实现逻辑，并给出关键代码位置（文件路径:行号）。',
-    '',
-    `问题：${task}`,
-  ].join('\n');
-}
 
 export class CodeUnderstandingHandler implements Handler {
   readonly intent = 'code_understanding' as const;
 
   constructor(
     private readonly runner: CliRunner,
+    /** /repos 作用域根：codex 在此 cwd 下自行路由（见 docs/handlers.md §9）。 */
+    private readonly reposRoot: string,
+    private readonly registry: ProjectRegistry,
     private readonly allowlist: string[],
     private readonly allowedChats: string[],
-    private readonly contact: ContactService | null = null,
-    private readonly lock: KeyedMutex = new KeyedMutex()
+    private readonly contact: ContactService | null = null
   ) {}
 
   /**
@@ -69,41 +62,52 @@ export class CodeUnderstandingHandler implements Handler {
       return;
     }
 
-    const resolved = resolveProject(ctx.intent.project, projects);
-    if (!resolved.ok) {
-      await ctx.reply.done(resolved.message);
+    const aliases = Object.keys(this.registry);
+    if (aliases.length === 0) {
+      await ctx.reply.done('尚未注册任何项目，请先在 projects.json 配置后再试。');
       return;
     }
 
-    const { alias, config: proj } = resolved;
-    logger.info(`[代码理解] 项目=${alias} cwd=${proj.path} task="${ctx.intent.task}"`);
-
-    // 先给出进度提示（阅读代码可能耗时）。
-    ctx.reply.push(`🔍 正在阅读「${alias}」的代码…\n\n`);
+    logger.info(`[代码理解] cwd=${this.reposRoot}（/repos 作用域自路由） task="${ctx.intent.task}"`);
+    ctx.reply.push('🔍 正在定位工程并阅读代码…\n\n');
 
     let acc = '';
-    let footer = '';
     try {
-      // 与 /git 运维共享仓库级锁：阅读期间不会被切分支/拉取覆盖，版本页脚也据此一致。
-      await this.lock.run(proj.path, async () => {
-        footer = await versionFooter(projectLabel(alias, proj.path), proj.path);
-        for await (const chunk of this.runner.run({
-          cwd: proj.path,
-          prompt: buildPrompt(ctx.intent.task),
-          mode: 'read',
-          timeoutMs: config.cli.timeoutMs,
-          signal: ctx.signal,
-        })) {
-          acc += chunk;
-          ctx.reply.push(chunk);
-        }
-      });
-      logger.info(`[代码理解] 完成，输出 ${acc.length} 字`);
-      const body = acc.trim() || '（CLI 无输出）';
+      // 不再持仓库锁（放弃"阅读中防切分支"，见 docs/handlers.md §9.4）。codex 在 /repos 下
+      // 读 AGENTS.md/简介自行选定工程作答，末尾以 __PROJECT__ 声明依据的工程。
+      for await (const chunk of this.runner.run({
+        cwd: this.reposRoot,
+        prompt: buildRoutingReadPrompt(ctx.intent.task),
+        mode: 'read',
+        timeoutMs: config.cli.timeoutMs,
+        signal: ctx.signal,
+      })) {
+        acc += chunk;
+        ctx.reply.push(chunk);
+      }
+
+      const declared = parseDeclaredProjects(acc, aliases);
+      const body = stripDeclaration(acc) || '（CLI 无输出）';
+      const footer = await this.buildFooter(declared);
+      logger.info(`[代码理解] 完成，声明工程=[${declared.join(', ') || '未声明'}]，输出 ${body.length} 字`);
       await ctx.reply.done(`${body}\n\n---\n${footer}`);
     } catch (e) {
       logger.error('[代码理解] 失败:', e);
-      await ctx.reply.fail(`代码理解执行失败（项目 ${alias}）：${(e as Error).message}`);
+      await ctx.reply.fail(`代码理解执行失败：${(e as Error).message}`);
     }
+  }
+
+  /** 据 codex 声明的工程（可多个，跨工程时逐个）事后采样版本页脚；未声明/非法则降级说明。 */
+  private async buildFooter(declared: string[]): Promise<string> {
+    if (declared.length === 0) {
+      return '📌 无法确定本次回答所依据的工程（codex 未声明 __PROJECT__），版本信息略。';
+    }
+    const lines = await Promise.all(
+      declared.map((alias) => {
+        const proj = this.registry[alias];
+        return versionFooter(projectLabel(alias, proj.path), proj.path);
+      })
+    );
+    return lines.join('\n');
   }
 }
