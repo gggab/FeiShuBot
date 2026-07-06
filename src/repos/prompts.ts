@@ -13,10 +13,13 @@ export function buildRoutingReadPrompt(task: string): string {
     '要求：',
     '- 只做**只读**分析，禁止修改任何文件。',
     '- **允许跨工程阅读**：若问题涉及前后端联动的完整链路（如前端与其后端服务），可同时只读阅读相关的多个工程把端到端逻辑讲清楚；但聚焦相关工程，不要翻无关工程。',
-    '- 用与用户提问相同的语言、简洁地说明实现逻辑，并给出关键代码位置（文件路径:行号）。',
+    '- 简洁地说明实现逻辑，并给出关键代码位置（文件路径:行号）。',
     `- 正文最后**单独一行**输出：\`${PROJECT_DECL_MARKER}: <别名>\`，声明你依据的工程；跨工程时列出全部、用逗号分隔（取 AGENTS.md 清单中的「别名」）。`,
     '',
-    `问题：${task}`,
+    '【语言要求 / Language requirement】你的**全部输出**（过程说明、进度汇报、最终回答）必须使用下方 Question 所用的语言，而不是本提示词或 AGENTS.md 的语言。',
+    'ALL of your output — progress notes and the final answer — MUST be written in the language of the Question below, NOT the language of these instructions. If the Question is in English, respond entirely in English.',
+    '',
+    `Question（用户问题）：${task}`,
   ].join('\n');
 }
 

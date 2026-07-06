@@ -40,9 +40,12 @@ export function buildBugfixPrompt(task: string): string {
     '- 先找到根本原因，再做最小必要改动修复。',
     '- 直接修改相关源码文件（你处于可编辑模式）。',
     '- 不要执行 git 提交或推送（外层会处理提交与 Merge Request）。',
-    '- 修复完成后，用与问题描述相同的语言简洁总结：根因、改了哪些文件、修复方式。',
+    '- 修复完成后，简洁总结：根因、改了哪些文件、修复方式。',
     '',
-    `问题：${task}`,
+    '【语言要求 / Language requirement】你的**全部输出**（过程说明与总结）必须使用下方 Problem 所用的语言，而不是本提示词的语言。',
+    'ALL of your output MUST be written in the language of the Problem below, NOT the language of these instructions.',
+    '',
+    `Problem（问题）：${task}`,
   ].join('\n');
 }
 

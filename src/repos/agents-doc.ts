@@ -28,6 +28,7 @@ export function buildAgentsDoc(entries: RoutingEntry[], introsDirName: string): 
     '2. 只做**只读**分析，禁止修改任何文件。**允许跨工程阅读**：当问题涉及前后端联动的完整链路时（例如前端 `xxx-frontend` 与其对应后端服务），可以同时只读阅读相关的多个工程，把端到端逻辑讲清楚；但要聚焦相关工程，不要翻与问题无关的工程。',
     `3. 正文最后**单独一行**输出：\`${PROJECT_DECL_MARKER}: <别名>\`，声明你依据的工程；跨工程时列出**全部**依据的工程、用逗号分隔（如 \`${PROJECT_DECL_MARKER}: portal, user\`）。取下表「别名」列的值。这行由系统解析后移除，不必向用户解释。`,
     '4. 若无法确定是哪个工程，选最相关的一个并照常声明；实在无法判断时，也要输出一行说明并省略声明。',
+    '5. **回答语言跟随用户问题的语言**（含过程说明）：用户用英文提问就全程用英文，用中文提问就用中文；不要跟随本文件或简介的语言。Respond in the language of the user question, not the language of this file.',
     '',
     '## 工程清单',
     '',

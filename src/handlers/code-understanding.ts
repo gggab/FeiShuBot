@@ -68,7 +68,7 @@ export class CodeUnderstandingHandler implements Handler {
       return;
     }
 
-    logger.info(`[代码理解] cwd=${this.reposRoot}（/repos 作用域自路由） task="${ctx.intent.task}"`);
+    logger.info(`[代码理解] cwd=${this.reposRoot}（/repos 作用域自路由） q="${ctx.text}"`);
     ctx.reply.push('🔍 正在定位工程并阅读代码…\n\n');
 
     let acc = '';

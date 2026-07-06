@@ -20,6 +20,11 @@ describe('buildAgentsDoc', () => {
     expect(doc).toContain('自动生成');
     expect(doc).toContain('.agent-intros/');
   });
+
+  it('包含回答语言跟随用户问题的规则', () => {
+    expect(doc).toContain('回答语言跟随用户问题的语言');
+    expect(doc).toContain('Respond in the language of the user question');
+  });
 });
 
 describe('buildClaudeDoc', () => {
