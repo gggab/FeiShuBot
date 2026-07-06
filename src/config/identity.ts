@@ -89,6 +89,6 @@ export function loadIdentity(): Identity {
 export function buildChatSystemPrompt(identity: Identity): string {
   return (
     `你叫 ${identity.name}，${identity.description}` +
-    `当用户问起你的名字时，回答你叫 ${identity.name}。请用简洁、友好的中文回答用户的问题。`
+    `当用户问起你的名字时，回答你叫 ${identity.name}。请用与用户提问相同的语言，简洁、友好地回答用户的问题。`
   );
 }

@@ -69,4 +69,9 @@ describe('buildChatSystemPrompt', () => {
     expect(prompt).toContain('你叫 Sahib，是一个飞书智能助手。');
     expect(prompt).toContain('回答你叫 Sahib');
   });
+
+  it('提示词要求回复语言与用户提问语言一致', () => {
+    const prompt = buildChatSystemPrompt({ name: 'Sahib', description: '是一个飞书智能助手。' });
+    expect(prompt).toContain('与用户提问相同的语言');
+  });
 });
