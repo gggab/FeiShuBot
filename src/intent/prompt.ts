@@ -20,7 +20,7 @@ export function buildIntentSystemPrompt(projectAliases: string[]): string {
     '- 出现“报错/异常/修一下/修复/不工作/崩溃” → bug_fix。',
     `可用项目别名（project 字段只能从中选择，否则省略该字段）：${aliasText}`,
     '严格只输出一个 JSON 对象，不要任何解释或代码块，格式：',
-    '{"intent":"四类之一","confidence":0到1的数字,"project":"项目别名(可省略)","task":"对用户诉求的简洁中文归一化描述","reason":"简短分类依据"}',
+    '{"intent":"四类之一","confidence":0到1的数字,"project":"项目别名(可省略)","task":"对用户诉求的简洁归一化描述（必须与用户消息使用相同的语言）","reason":"简短分类依据"}',
   ].join('\n');
 }
 
