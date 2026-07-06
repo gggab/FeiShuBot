@@ -62,7 +62,7 @@ export class BugFixHandler implements Handler {
     let acc = '';
     for await (const chunk of this.runner.run({
       cwd: this.reposRoot,
-      prompt: buildRoutingLocatePrompt(ctx.intent.task),
+      prompt: buildRoutingLocatePrompt(ctx.text),
       mode: 'read',
       timeoutMs: config.cli.timeoutMs,
       signal: ctx.signal,
@@ -172,7 +172,7 @@ export class BugFixHandler implements Handler {
       let summary = '';
       for await (const chunk of this.runner.run({
         cwd: worktree,
-        prompt: buildBugfixPrompt(ctx.intent.task),
+        prompt: buildBugfixPrompt(ctx.text),
         mode: 'write',
         timeoutMs: config.cli.bugfixTimeoutMs,
         signal: ctx.signal,

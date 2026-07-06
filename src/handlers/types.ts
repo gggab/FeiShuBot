@@ -22,6 +22,8 @@ export interface ReplyStream {
 export interface HandlerContext {
   userId: string;
   chatId: string;
+  /** 用户消息原文：面向用户/CLI 的提问用它（保留原语言）；intent.task 仅作分支命名等内部用途。 */
+  text: string;
   intent: IntentResult;
   session: SessionContext;
   reply: ReplyStream;

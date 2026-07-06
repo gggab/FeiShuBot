@@ -38,6 +38,7 @@ function makeCtx(reply: ReplyStream, session: SessionContext, text: string): Han
   return {
     userId: 'u',
     chatId: 'c',
+    text,
     intent: { intent: 'chat', confidence: 1, task: text },
     session,
     reply,

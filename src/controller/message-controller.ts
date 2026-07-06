@@ -209,6 +209,7 @@ export class MessageController {
     const ctx: HandlerContext = {
       userId: msg.userId,
       chatId: msg.chatId,
+      text,
       intent: outcome.intent,
       session,
       reply,

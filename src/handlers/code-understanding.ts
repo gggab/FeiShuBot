@@ -77,7 +77,7 @@ export class CodeUnderstandingHandler implements Handler {
       // 读 AGENTS.md/简介自行选定工程作答，末尾以 __PROJECT__ 声明依据的工程。
       for await (const chunk of this.runner.run({
         cwd: this.reposRoot,
-        prompt: buildRoutingReadPrompt(ctx.intent.task),
+        prompt: buildRoutingReadPrompt(ctx.text),
         mode: 'read',
         timeoutMs: config.cli.timeoutMs,
         signal: ctx.signal,

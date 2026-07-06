@@ -28,7 +28,7 @@ interface IntentResult {
   intent: 'code_understanding' | 'bug_fix' | 'knowledge_qa' | 'chat';
   confidence: number;          // 0..1
   project?: string;            // 命中的项目别名（须在 Project Registry 中），可空
-  task: string;                // 归一化后的、给 Handler 用的任务描述
+  task: string;                // 归一化后的任务描述（与用户消息同语言），仅作分支命名/日志等内部用途
   reason?: string;             // 分类依据（便于日志与调试）
 }
 ```
@@ -36,7 +36,7 @@ interface IntentResult {
 约束：
 - `project` 必须是项目注册表中存在的别名；模型给出未知别名时视为 `undefined`。
 - **注意（自 §handlers 9 起）**：`code_understanding` 与 `bug_fix` 的**工程路由不再依赖本字段**——改由 codex 在 `/repos` 作用域读工程简介自行判定（见 [handlers.md](handlers.md) §9）。识别器仍可给出 `project` 作为日志/参考，但 Handler 不用它选工程。这样用户用完整仓库名（`std-smart-office-room`）也能命中，无需人工维护别名映射。
-- `task` 是对原始消息的清洗/补全（去寒暄、补主语），便于下游 prompt。
+- `task` 是对原始消息的清洗/补全（去寒暄、补主语），要求与用户消息语言一致。**面向用户/CLI 的提问一律用 `HandlerContext.text`（用户原文）**，保证回复语言跟随用户；`task` 只用于分支命名、commit 标题、日志等内部用途。
 
 ## 4. 分类提示词（草案）
 

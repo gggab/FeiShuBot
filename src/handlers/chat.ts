@@ -20,7 +20,7 @@ export class ChatHandler implements Handler {
   }
 
   async handle(ctx: HandlerContext): Promise<void> {
-    const userText = ctx.intent.task;
+    const userText = ctx.text;
     ctx.session.addUser(userText, ctx.userId);
 
     const messages: ChatMessage[] = [
