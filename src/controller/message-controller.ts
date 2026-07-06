@@ -207,7 +207,7 @@ export class MessageController {
       chatId: msg.chatId,
       chatType: msg.chatType,
     });
-    const reply = new CardReplyStream(msg.chatId, { taskId, signal });
+    const reply = new CardReplyStream(msg.chatId, { taskId, signal, lang: detectLang(text) });
     await reply.init();
     const ctx: HandlerContext = {
       userId: msg.userId,

@@ -101,6 +101,7 @@ function buildCard(content: string) {
 - **卡片更新串行化（避免终态回跳）**：所有 `patch` 经 `CardReplyStream.updateChain` 串成一条链**按提交顺序落地**。否则一个在途的 `processing` 更新（心跳/流式）可能比 `done` 的 `patch` **更晚返回**，把已完成的绿色卡片**打回「处理中」且内容回退成半截**。串行化保证终态（done/error/stopped）因最后提交而最后生效；`doFlush` 再加一道守卫——`finalized` 后丢弃仍排在链上的 `processing` 更新。
 
 > 状态与头部映射集中在 `feishu/card.ts` 的 `CARD_STATUS`；心跳间隔为 `feishu/reply.ts` 的 `CARD_HEARTBEAT_INTERVAL_MS`。
+> **语言**：卡片固定文案（状态标题、已用时、停止按钮、占位「思考中…」、「已由用户停止」）按用户消息语言取中/英版本——Controller 用 `detectLang(text)` 判定后经 `CardReplyOptions.lang` 传入，默认中文（`/git` 命令等中文入口不受影响）。
 
 ### 3.2 停止按钮与任务取消
 

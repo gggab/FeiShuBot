@@ -61,6 +61,18 @@ describe('buildMarkdownCard', () => {
       expect(card.body.elements.some((e: any) => e.tag === 'button')).toBe(false);
     }
   });
+
+  it('lang=en：状态标题、已用时与停止按钮用英文', () => {
+    const card = buildMarkdownCard('working', 'processing', 12000, 'task-1', 'en');
+    expect(card.header.title.content).toBe('⏳ Processing…');
+    expect(card.header.subtitle?.content).toBe('elapsed 12s');
+    const btn = card.body.elements.find((e: any) => e.tag === 'button') as any;
+    expect(btn.text.content).toBe('⏹ Stop');
+
+    expect(buildMarkdownCard('x', 'done', undefined, undefined, 'en').header.title.content).toBe('✅ Done');
+    expect(buildMarkdownCard('x', 'error', undefined, undefined, 'en').header.title.content).toBe('❌ Failed');
+    expect(buildMarkdownCard('x', 'stopped', undefined, undefined, 'en').header.title.content).toBe('⏹ Stopped');
+  });
 });
 
 describe('formatElapsed', () => {

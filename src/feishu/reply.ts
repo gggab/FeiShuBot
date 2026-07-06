@@ -11,6 +11,7 @@
 import { larkClient } from './client';
 import { buildMarkdownCard, CardStatus } from './card';
 import { ReplyStream } from '../handlers/types';
+import { Lang, pick } from '../util/lang';
 import { throttle } from '../util/throttle';
 import { logger } from '../util/logger';
 
@@ -72,6 +73,8 @@ export interface CardReplyOptions {
   taskId?: string;
   /** 用户点「停止」时触发；一旦 abort，终态渲染为「已停止」而非「失败」。 */
   signal?: AbortSignal;
+  /** 卡片固定文案语言（状态标题/已用时/按钮/占位），跟随用户消息语言，默认中文。 */
+  lang?: Lang;
 }
 
 /**
@@ -87,6 +90,7 @@ export class CardReplyStream implements ReplyStream {
   private startedAt = 0;
   private heartbeat: NodeJS.Timeout | null = null;
   private readonly taskId?: string;
+  private readonly lang: Lang;
   private aborted = false;
   /** 卡片更新串行链：保证 patch 按提交顺序落地，终态不被在途的 processing 更新覆盖。 */
   private updateChain: Promise<void> = Promise.resolve();
@@ -99,6 +103,7 @@ export class CardReplyStream implements ReplyStream {
     opts: CardReplyOptions = {}
   ) {
     this.taskId = opts.taskId;
+    this.lang = opts.lang ?? 'zh';
     const signal = opts.signal;
     if (signal) {
       if (signal.aborted) this.aborted = true;
@@ -109,9 +114,13 @@ export class CardReplyStream implements ReplyStream {
   }
 
   /** 发送占位卡片并记录 messageId，启动处理中心跳。必须在 push 之前调用。 */
-  async init(placeholder = '思考中… / Thinking…'): Promise<void> {
+  async init(placeholder?: string): Promise<void> {
     this.startedAt = Date.now();
-    const { messageId } = await sendCard(this.chatId, buildMarkdownCard(placeholder, 'processing', 0, this.taskId));
+    const text = placeholder ?? pick(this.lang, '思考中…', 'Thinking…');
+    const { messageId } = await sendCard(
+      this.chatId,
+      buildMarkdownCard(text, 'processing', 0, this.taskId, this.lang)
+    );
     this.messageId = messageId;
     // init 期间就被停止：立即渲染「已停止」终态。
     if (this.aborted && !this.finalized) {
@@ -168,7 +177,7 @@ export class CardReplyStream implements ReplyStream {
       this.heartbeat = null;
     }
     if (status === 'stopped') {
-      this.buffer = `${this.buffer.trim()}\n\n⏹ 已由用户停止`.trim();
+      this.buffer = `${this.buffer.trim()}\n\n${pick(this.lang, '⏹ 已由用户停止', '⏹ Stopped by the user')}`.trim();
     }
     await this.flush(status);
   }
@@ -188,7 +197,7 @@ export class CardReplyStream implements ReplyStream {
     if (status === 'processing' && this.finalized) return;
     try {
       const elapsedMs = status === 'processing' ? Date.now() - this.startedAt : undefined;
-      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs, this.taskId));
+      await updateCard(this.messageId, buildMarkdownCard(this.buffer || '…', status, elapsedMs, this.taskId, this.lang));
     } catch (e) {
       // 卡片更新失败不应让整个处理流程崩溃；显式记录。
       logger.error('更新卡片失败:', e);
