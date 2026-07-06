@@ -6,7 +6,8 @@
 interface HandlerContext {
   userId: string;
   chatId: string;
-  intent: IntentResult;        // 来自意图识别
+  text: string;                // 用户消息原文：面向用户/CLI 的提问用它（保留原语言）
+  intent: IntentResult;        // 来自意图识别（intent.task 仅作分支命名等内部用途）
   session: SessionContext;     // 该用户的会话上下文
   reply: ReplyStream;          // 流式回复句柄（封装节流 updateMessage）
   signal?: AbortSignal;        // 取消信号：用户点「停止回复」按钮时触发（见 feishu-integration §3.2）
@@ -27,6 +28,8 @@ interface Handler {
 `HandlerRegistry` 持有四个 Handler，按 `ctx.intent.intent` 分发；找不到则显式报错（不应发生，枚举封闭）。
 
 **通用前置**：Controller 在调用 Handler 前已发送占位卡片并拿到 `messageId`，`reply` 即绑定该卡片。
+
+**回复语言跟随用户**：LLM/CLI 输出靠提示词中的双语强指令约束（跟随 Question/Problem 的语言）；各 Handler 的**固定文案**（进度提示、权限拒绝、错误、版本页脚等）经 `util/lang.ts` 的 `detectLang(ctx.text)` 判定（含汉字 → 中文，否则英文）后用 `pick(lang, zh, en)` 取对应文案。
 
 ## 2. CodeUnderstandingHandler（理解项目代码）
 

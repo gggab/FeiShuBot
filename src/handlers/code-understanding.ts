@@ -14,6 +14,7 @@ import { versionFooter } from '../git/inspect';
 import { buildRoutingReadPrompt } from '../repos/prompts';
 import { parseDeclaredProjects, stripDeclaration } from '../repos/routing';
 import { config } from '../config';
+import { detectLang, pick, Lang } from '../util/lang';
 import { logger } from '../util/logger';
 
 export class CodeUnderstandingHandler implements Handler {
@@ -53,23 +54,34 @@ export class CodeUnderstandingHandler implements Handler {
   }
 
   async handle(ctx: HandlerContext): Promise<void> {
+    const lang = detectLang(ctx.text);
     // 权限强制校验：仅授权的群或人员可触发"阅读源码"。
     if (!(await this.isAuthorized(ctx.userId, ctx.chatId))) {
       logger.warn(`[权限] 拒绝阅读源码请求 user=${ctx.userId} chat=${ctx.chatId} task="${ctx.intent.task}"`);
       await ctx.reply.done(
-        '⛔ 你没有阅读源码的权限。\n「代码理解 / 阅读源码」仅限授权的群或人员，如需开通请联系管理员。'
+        pick(
+          lang,
+          '⛔ 你没有阅读源码的权限。\n「代码理解 / 阅读源码」仅限授权的群或人员，如需开通请联系管理员。',
+          '⛔ You are not authorized to read source code.\nCode understanding is limited to authorized chats or users; contact an admin for access.'
+        )
       );
       return;
     }
 
     const aliases = Object.keys(this.registry);
     if (aliases.length === 0) {
-      await ctx.reply.done('尚未注册任何项目，请先在 projects.json 配置后再试。');
+      await ctx.reply.done(
+        pick(
+          lang,
+          '尚未注册任何项目，请先在 projects.json 配置后再试。',
+          'No project is registered yet. Configure projects.json first and try again.'
+        )
+      );
       return;
     }
 
     logger.info(`[代码理解] cwd=${this.reposRoot}（/repos 作用域自路由） q="${ctx.text}"`);
-    ctx.reply.push('🔍 正在定位工程并阅读代码…\n\n');
+    ctx.reply.push(pick(lang, '🔍 正在定位工程并阅读代码…\n\n', '🔍 Locating the project and reading code…\n\n'));
 
     let acc = '';
     try {
@@ -87,25 +99,31 @@ export class CodeUnderstandingHandler implements Handler {
       }
 
       const declared = parseDeclaredProjects(acc, aliases);
-      const body = stripDeclaration(acc) || '（CLI 无输出）';
-      const footer = await this.buildFooter(declared);
+      const body = stripDeclaration(acc) || pick(lang, '（CLI 无输出）', '(no CLI output)');
+      const footer = await this.buildFooter(declared, lang);
       logger.info(`[代码理解] 完成，声明工程=[${declared.join(', ') || '未声明'}]，输出 ${body.length} 字`);
       await ctx.reply.done(`${body}\n\n---\n${footer}`);
     } catch (e) {
       logger.error('[代码理解] 失败:', e);
-      await ctx.reply.fail(`代码理解执行失败：${(e as Error).message}`);
+      await ctx.reply.fail(
+        pick(lang, `代码理解执行失败：${(e as Error).message}`, `Code understanding failed: ${(e as Error).message}`)
+      );
     }
   }
 
   /** 据 codex 声明的工程（可多个，跨工程时逐个）事后采样版本页脚；未声明/非法则降级说明。 */
-  private async buildFooter(declared: string[]): Promise<string> {
+  private async buildFooter(declared: string[], lang: Lang): Promise<string> {
     if (declared.length === 0) {
-      return '📌 无法确定本次回答所依据的工程（codex 未声明 __PROJECT__），版本信息略。';
+      return pick(
+        lang,
+        '📌 无法确定本次回答所依据的工程（codex 未声明 __PROJECT__），版本信息略。',
+        '📌 Could not determine which project this answer is based on (codex did not declare __PROJECT__); version info omitted.'
+      );
     }
     const lines = await Promise.all(
       declared.map((alias) => {
         const proj = this.registry[alias];
-        return versionFooter(projectLabel(alias, proj.path), proj.path);
+        return versionFooter(projectLabel(alias, proj.path), proj.path, lang);
       })
     );
     return lines.join('\n');

@@ -7,6 +7,7 @@
 import { Handler, HandlerContext } from './types';
 import { LlmClient, ChatMessage } from '../llm/client';
 import { Identity, buildChatSystemPrompt } from '../config/identity';
+import { detectLang, pick } from '../util/lang';
 import { logger } from '../util/logger';
 
 export class ChatHandler implements Handler {
@@ -40,7 +41,13 @@ export class ChatHandler implements Handler {
       logger.info(`[chat] 完成，输出 ${acc.length} 字`);
     } catch (e) {
       logger.error('[chat] 生成失败:', e);
-      await ctx.reply.fail('生成回复失败，请重试 / Failed to generate a reply: ' + (e as Error).message);
+      await ctx.reply.fail(
+        pick(
+          detectLang(ctx.text),
+          '生成回复失败，请重试：' + (e as Error).message,
+          'Failed to generate a reply, please retry: ' + (e as Error).message
+        )
+      );
     }
   }
 }

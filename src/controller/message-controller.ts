@@ -18,10 +18,13 @@ import { TaskRegistry } from './task-registry';
 import { ChatAdminService } from '../feishu/chat-admin';
 import { StopResult } from '../feishu/dispatcher';
 import { ConversationQueue } from '../util/conversation-queue';
+import { detectLang, pick } from '../util/lang';
 import { logger } from '../util/logger';
 
-const DEGRADE_NOTICE =
+const DEGRADE_NOTICE_ZH =
   '⚠️ 不太确定你的意图，先按普通聊天回答；如需「代码理解」或「修复 Bug」，请说明项目与具体诉求。';
+const DEGRADE_NOTICE_EN =
+  '⚠️ Not sure what you intended; answering as regular chat. For code understanding or bug fixing, please name the project and describe the request.';
 
 /** 截断长文本用于日志。 */
 function truncate(text: string, max = 80): string {
@@ -194,7 +197,7 @@ export class MessageController {
     // 2. 低置信度/解析失败 → 已被降级为 chat，向用户显式说明。
     if (outcome.degraded) {
       logger.info('[意图] 置信度不足，已降级为 chat 并提示用户');
-      await sendText(msg.chatId, DEGRADE_NOTICE);
+      await sendText(msg.chatId, pick(detectLang(text), DEGRADE_NOTICE_ZH, DEGRADE_NOTICE_EN));
     }
 
     // 3. 路由到对应 Handler，流式回卡片。登记可取消任务，卡片带「停止回复」按钮。

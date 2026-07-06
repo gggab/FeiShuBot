@@ -16,6 +16,7 @@ import { isAuthorizedToModify, splitUserEntries } from '../auth/authorization';
 import { buildRoutingLocatePrompt } from '../repos/prompts';
 import { parseDeclaredProject } from '../repos/routing';
 import { config } from '../config';
+import { detectLang, pick } from '../util/lang';
 import { logger } from '../util/logger';
 import { buildFixBranch, buildCommitMessage, buildBugfixPrompt, buildMrDescription } from './bugfix-naming';
 
@@ -117,21 +118,30 @@ export class BugFixHandler implements Handler {
   }
 
   async handle(ctx: HandlerContext): Promise<void> {
+    const lang = detectLang(ctx.text);
     // 权限强制校验：仅授权人员（按部门或 open_id 白名单）可触发"修改代码"。
     if (!(await this.isAuthorized(ctx.userId))) {
       logger.warn(`[权限] 拒绝修改代码请求 user=${ctx.userId} task="${ctx.intent.task}"`);
       await ctx.reply.done(
-        '⛔ 你没有修改代码的权限。\n「Bug 修复 / 修改代码」仅限授权人员（按部门或白名单），如需开通请联系管理员。'
+        pick(
+          lang,
+          '⛔ 你没有修改代码的权限。\n「Bug 修复 / 修改代码」仅限授权人员（按部门或白名单），如需开通请联系管理员。',
+          '⛔ You are not authorized to modify code.\nBug fixing is limited to authorized users (by department or allowlist); contact an admin for access.'
+        )
       );
       return;
     }
 
     // 前置路由：让 codex 借 AGENTS.md/简介判定工程（不再依赖意图识别器预选的 project）。
-    ctx.reply.push('🔎 正在定位要修复的工程…\n');
+    ctx.reply.push(pick(lang, '🔎 正在定位要修复的工程…\n', '🔎 Locating the project to fix…\n'));
     const alias = await this.locateProject(ctx);
     if (!alias || !projects[alias]) {
       await ctx.reply.done(
-        `未能确定要修复哪个工程，请在描述中点名工程（如「std-smart-office-room」）后重试。\n可用工程：${Object.keys(projects).join('、')}`
+        pick(
+          lang,
+          `未能确定要修复哪个工程，请在描述中点名工程（如「std-smart-office-room」）后重试。\n可用工程：${Object.keys(projects).join('、')}`,
+          `Could not determine which project to fix. Please name the project in your description (e.g. "std-smart-office-room") and try again.\nAvailable projects: ${Object.keys(projects).join(', ')}`
+        )
       );
       return;
     }
@@ -139,18 +149,36 @@ export class BugFixHandler implements Handler {
     logger.info(`[Bug修复] 路由定位 → ${alias}`);
 
     if (!proj.gitlabProjectId) {
-      await ctx.reply.done(`项目「${alias}」未配置 gitlabProjectId，无法走 MR 流程（仅支持代码理解）。`);
+      await ctx.reply.done(
+        pick(
+          lang,
+          `项目「${alias}」未配置 gitlabProjectId，无法走 MR 流程（仅支持代码理解）。`,
+          `Project "${alias}" has no gitlabProjectId configured, so the MR workflow is unavailable (code understanding only).`
+        )
+      );
       return;
     }
     if (!this.gitlab) {
-      await ctx.reply.done('未配置 GITLAB_BASE_URL / GITLAB_TOKEN，无法创建 Merge Request。');
+      await ctx.reply.done(
+        pick(
+          lang,
+          '未配置 GITLAB_BASE_URL / GITLAB_TOKEN，无法创建 Merge Request。',
+          'GITLAB_BASE_URL / GITLAB_TOKEN is not configured; cannot create a Merge Request.'
+        )
+      );
       return;
     }
 
     const baseBranch = proj.baseBranch || config.gitlab.defaultBaseBranch;
 
     if (this.locks.has(proj.path)) {
-      await ctx.reply.done(`项目「${alias}」有正在进行的修复任务，请稍候再试。`);
+      await ctx.reply.done(
+        pick(
+          lang,
+          `项目「${alias}」有正在进行的修复任务，请稍候再试。`,
+          `Project "${alias}" already has a fix task in progress. Please try again later.`
+        )
+      );
       return;
     }
     this.locks.add(proj.path);
@@ -163,12 +191,24 @@ export class BugFixHandler implements Handler {
     logger.info(`[Bug修复] 项目=${alias} base=${baseBranch} branch=${branch} task="${ctx.intent.task}"`);
 
     try {
-      ctx.reply.push(`🐞 修复「${alias}」：${ctx.intent.task}\n\n① 准备工作区（基于 ${baseBranch}）…\n`);
+      ctx.reply.push(
+        pick(
+          lang,
+          `🐞 修复「${alias}」：${ctx.text}\n\n① 准备工作区（基于 ${baseBranch}）…\n`,
+          `🐞 Fixing "${alias}": ${ctx.text}\n\n① Preparing the workspace (based on ${baseBranch})…\n`
+        )
+      );
       await ws.fetch();
       await ws.createWorktree(worktree, branch, baseBranch);
       worktreeCreated = true;
 
-      ctx.reply.push(`② 切分支 ${branch}，调用 Claude 修复（可能需要数分钟，处理过程见控制台）…\n\n`);
+      ctx.reply.push(
+        pick(
+          lang,
+          `② 切分支 ${branch}，调用 Claude 修复（可能需要数分钟，处理过程见控制台）…\n\n`,
+          `② Switched to branch ${branch}; invoking Claude to fix (this may take a few minutes; see console for progress)…\n\n`
+        )
+      );
       let summary = '';
       for await (const chunk of this.runner.run({
         cwd: worktree,
@@ -185,17 +225,23 @@ export class BugFixHandler implements Handler {
       if (changed.length === 0) {
         logger.info('[Bug修复] 未产生改动，取消并清理');
         await ctx.reply.done(
-          `Claude 未对「${alias}」产生任何改动，已取消（未建 MR）。\n\nClaude 说明：\n${summary.trim().slice(0, 1500)}`
+          pick(
+            lang,
+            `Claude 未对「${alias}」产生任何改动，已取消（未建 MR）。\n\nClaude 说明：\n${summary.trim().slice(0, 1500)}`,
+            `Claude made no changes to "${alias}"; the task was cancelled (no MR created).\n\nClaude's notes:\n${summary.trim().slice(0, 1500)}`
+          )
         );
         return;
       }
       logger.info(`[Bug修复] 改动 ${changed.length} 个文件，提交并推送`);
 
-      ctx.reply.push(`③ 提交并推送（${changed.length} 个文件）…\n`);
+      ctx.reply.push(
+        pick(lang, `③ 提交并推送（${changed.length} 个文件）…\n`, `③ Committing and pushing (${changed.length} files)…\n`)
+      );
       await ws.commitAll(worktree, buildCommitMessage(ctx.intent.task));
       await ws.push(worktree, branch);
 
-      ctx.reply.push('④ 创建 Merge Request…\n');
+      ctx.reply.push(pick(lang, '④ 创建 Merge Request…\n', '④ Creating the Merge Request…\n'));
       const reviewer = await this.resolveReviewer(ctx.userId);
       const mr = await this.gitlab.createMergeRequest({
         projectId: proj.gitlabProjectId,
@@ -212,16 +258,31 @@ export class BugFixHandler implements Handler {
       });
 
       const reviewerNote = reviewer
-        ? `已指派 @${reviewer.username} review`
-        : '⚠️ 未找到你的 GitLab 账号（手填映射/邮箱均未命中），请在 MR 中手动指定 reviewer';
+        ? pick(lang, `已指派 @${reviewer.username} review`, `Assigned @${reviewer.username} as reviewer`)
+        : pick(
+            lang,
+            '⚠️ 未找到你的 GitLab 账号（手填映射/邮箱均未命中），请在 MR 中手动指定 reviewer',
+            '⚠️ Could not find your GitLab account (no manual mapping or email match); please assign a reviewer on the MR manually'
+          );
       logger.info(`[Bug修复] 完成 MR=${mr.webUrl}`);
       await ctx.reply.done(
-        `✅ 已为「${alias}」创建 Merge Request：\n${mr.webUrl}\n\n` +
-          `目标分支：${baseBranch}\n${reviewerNote}\n\n改动文件：\n${changed.join('\n')}`
+        pick(
+          lang,
+          `✅ 已为「${alias}」创建 Merge Request：\n${mr.webUrl}\n\n` +
+            `目标分支：${baseBranch}\n${reviewerNote}\n\n改动文件：\n${changed.join('\n')}`,
+          `✅ Created a Merge Request for "${alias}":\n${mr.webUrl}\n\n` +
+            `Target branch: ${baseBranch}\n${reviewerNote}\n\nChanged files:\n${changed.join('\n')}`
+        )
       );
     } catch (e) {
       logger.error('[Bug修复] 失败:', e);
-      await ctx.reply.fail(`Bug 修复失败（项目 ${alias}）：${(e as Error).message}`);
+      await ctx.reply.fail(
+        pick(
+          lang,
+          `Bug 修复失败（项目 ${alias}）：${(e as Error).message}`,
+          `Bug fix failed (project ${alias}): ${(e as Error).message}`
+        )
+      );
     } finally {
       if (worktreeCreated) await ws.cleanup(worktree, branch);
       this.locks.delete(proj.path);

@@ -29,6 +29,13 @@ describe('formatVersionFooter (纯函数)', () => {
     const v: RepoVersion = { ...base, branch: '', detached: true, tag: undefined };
     expect(formatVersionFooter('portal', v)).toContain('游离 HEAD');
   });
+
+  it('英文变体（lang=en）', () => {
+    const v: RepoVersion = { ...base, subject: 'fix login', relDate: '2 days ago' };
+    expect(formatVersionFooter('portal', v, 'en')).toBe(
+      '📌 Based on **portal** · branch `develop` · commit `abc1234` (fix login, 2 days ago)'
+    );
+  });
 });
 
 describe('getRepoVersion (临时仓库集成)', () => {

@@ -6,6 +6,7 @@
  */
 
 import { git } from './run';
+import { Lang, pick } from '../util/lang';
 import { logger } from '../util/logger';
 
 /** 单元分隔符，避免提交标题里的空格/特殊字符干扰解析。 */
@@ -51,8 +52,11 @@ export async function getRepoVersion(repoPath: string): Promise<RepoVersion> {
 }
 
 /** 「分支 x / tag y / 游离 HEAD」这一段位置描述（纯函数）。 */
-function whereOf(v: RepoVersion): string {
-  return v.detached ? (v.tag ? `tag \`${v.tag}\`` : '游离 HEAD') : `分支 \`${v.branch}\``;
+function whereOf(v: RepoVersion, lang: Lang = 'zh'): string {
+  if (v.detached) {
+    return v.tag ? `tag \`${v.tag}\`` : pick(lang, '游离 HEAD', 'detached HEAD');
+  }
+  return `${pick(lang, '分支', 'branch')} \`${v.branch}\``;
 }
 
 /** 紧凑版本描述「分支 x @ sha」，用于批量结果行（纯函数）。 */
@@ -61,18 +65,25 @@ export function describeVersion(v: RepoVersion): string {
 }
 
 /** 把版本快照格式化成回答页脚（纯函数）。name 为项目展示名（见 projectLabel）。 */
-export function formatVersionFooter(name: string, v: RepoVersion): string {
-  const subj = v.subject ? `${v.subject}，` : '';
-  const dirty = v.dirty ? ' · ⚠️ 工作区有未提交改动' : '';
-  return `📌 基于 **${name}** · ${whereOf(v)} · 提交 \`${v.sha}\`（${subj}${v.relDate}）${dirty}`;
+export function formatVersionFooter(name: string, v: RepoVersion, lang: Lang = 'zh'): string {
+  const subj = v.subject ? `${v.subject}${pick(lang, '，', ', ')}` : '';
+  const dirty = v.dirty ? pick(lang, ' · ⚠️ 工作区有未提交改动', ' · ⚠️ uncommitted changes in worktree') : '';
+  const based = pick(lang, '基于', 'Based on');
+  const commit = pick(lang, '提交', 'commit');
+  const detail = pick(lang, `（${subj}${v.relDate}）`, ` (${subj}${v.relDate})`);
+  return `📌 ${based} **${name}** · ${whereOf(v, lang)} · ${commit} \`${v.sha}\`${detail}${dirty}`;
 }
 
 /** 便捷封装：采集并格式化；失败不抛，降级为「无法读取版本」提示（不阻断回答）。 */
-export async function versionFooter(name: string, repoPath: string): Promise<string> {
+export async function versionFooter(name: string, repoPath: string, lang: Lang = 'zh'): Promise<string> {
   try {
-    return formatVersionFooter(name, await getRepoVersion(repoPath));
+    return formatVersionFooter(name, await getRepoVersion(repoPath), lang);
   } catch (e) {
     logger.warn(`[版本] 读取 git 版本失败 ${repoPath}: ${(e as Error).message}`);
-    return `📌 基于 **${name}**（无法读取 git 版本信息）`;
+    return pick(
+      lang,
+      `📌 基于 **${name}**（无法读取 git 版本信息）`,
+      `📌 Based on **${name}** (failed to read git version info)`
+    );
   }
 }
